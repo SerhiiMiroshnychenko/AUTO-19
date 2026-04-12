@@ -53,7 +53,7 @@ class StockWarehouseOrderpoint(models.Model):
                 else:
                     orderpoint.qty_forecast = product_data['virtual_available'] + qty_in_progress
 
-    def _get_qty_to_order(self, force_visibility_days=False, qty_in_progress_by_orderpoint={}):
+    def _get_qty_to_order(self, qty_in_progress_by_orderpoint=None):
         """Override to use virtual_available_real for order quantity calculation.
 
         When qty_forecast < product_min_qty, the scheduler will create
@@ -63,16 +63,14 @@ class StockWarehouseOrderpoint(models.Model):
         if not self.product_id or not self.location_id:
             return False
 
-        visibility_days = self.visibility_days
-        if force_visibility_days is not False:
-            visibility_days = force_visibility_days
+        qty_in_progress_by_orderpoint = qty_in_progress_by_orderpoint or {}
 
         qty_to_order = 0.0
         rounding = self.product_uom.rounding
 
         # Check main condition: forecast below minimum
         if float_compare(self.qty_forecast, self.product_min_qty, precision_rounding=rounding) < 0:
-            product_context = self._get_product_context(visibility_days=visibility_days)
+            product_context = self._get_product_context()
             qty_in_progress = qty_in_progress_by_orderpoint.get(self.id) or self._quantity_in_progress()[self.id]
 
             # Use virtual_available_real instead of virtual_available
@@ -89,14 +87,8 @@ class StockWarehouseOrderpoint(models.Model):
 
             qty_to_order = max(self.product_min_qty, self.product_max_qty) - qty_forecast_with_visibility
 
-            # Handle qty_multiple
-            remainder = (self.qty_multiple > 0.0 and qty_to_order % self.qty_multiple) or 0.0
-            if (float_compare(remainder, 0.0, precision_rounding=rounding) > 0
-                    and float_compare(self.qty_multiple - remainder, 0.0, precision_rounding=rounding) > 0):
-                if float_is_zero(self.product_max_qty, precision_rounding=rounding):
-                    qty_to_order += self.qty_multiple - remainder
-                else:
-                    qty_to_order -= remainder
+            # Handle qty multiple using Odoo 19 logic
+            qty_to_order = self._get_multiple_rounded_qty(qty_to_order)
 
         return qty_to_order
 

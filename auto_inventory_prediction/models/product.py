@@ -58,11 +58,11 @@ class Product(models.Model):
             .with_context(prefetch_fields=True)
         )
         res = products._compute_quantities_dict(
-            self._context.get("lot_id"),
-            self._context.get("owner_id"),
-            self._context.get("package_id"),
-            self._context.get("from_date"),
-            self._context.get("to_date"),
+            self.env.context.get("lot_id"),
+            self.env.context.get("owner_id"),
+            self.env.context.get("package_id"),
+            self.env.context.get("from_date"),
+            self.env.context.get("to_date"),
         )
         for product in products:
             product.update(res[product.id])
