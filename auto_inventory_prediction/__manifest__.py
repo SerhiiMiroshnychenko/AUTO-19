@@ -5,7 +5,7 @@
     'summary': 'ML-based order success prediction and enhanced stock forecasting',
     'sequence': 1,
     'description': """
-        Auto Inventory Prediction
+        Auto Inventory
         =========================
         Binary classification of sale orders using XGBoost.
         Enhanced stock forecasted report with virtual_available_real.
