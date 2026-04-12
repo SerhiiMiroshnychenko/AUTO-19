@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Partner Info Extend (inactive, run manually or scheduled) -->
+    <record id="ir_cron_partner_info_extend" model="ir.cron">
+        <field name="name">Partner Info Extend (Auto Inventory Prediction)</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="state">code</field>
+        <field name="code">model.partner_info_extend()</field>
+        <field name="interval_number">12</field>
+        <field name="interval_type">months</field>
+        <field name="active" eval="False"/>
+    </record>
+</odoo>

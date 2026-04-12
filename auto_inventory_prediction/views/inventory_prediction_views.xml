@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Form View -->
+    <record id="view_inventory_prediction_model_form" model="ir.ui.view">
+        <field name="name">inventory.prediction.model.form</field>
+        <field name="model">inventory.prediction.model</field>
+        <field name="arch" type="xml">
+            <form string="Модель прогнозування запасів">
+                <header>
+                    <button name="train_model" string="Навчати модель" type="object" class="oe_highlight"
+                            invisible="state == 'trained'"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box" invisible="state == 'draft'">
+                        <button name="toggle_is_production"
+                                invisible="not is_production"
+                                class="oe_stat_button" type="object" icon="fa-play">
+                            <div class="o_stat_info o_field_widget">
+                                <span class="text-success">Production</span>
+                                <span class="o_stat_text">Environment</span>
+                            </div>
+                        </button>
+                        <button name="toggle_is_production"
+                                invisible="is_production"
+                                class="oe_stat_button"
+                                type="object" icon="fa-stop">
+                            <div class="o_stat_info o_field_widget">
+                                <span class="o_stat_text o_warning_text fw-bold">Test</span>
+                                <span class="o_stat_text">Environment</span>
+                            </div>
+                        </button>
+                        <button name="toggle_use_extended_database"
+                                invisible="not use_extended_database"
+                                class="oe_stat_button" type="object" icon="fa-files-o">
+                            <div class="o_stat_info o_field_widget">
+                                <span class="text-success">Extended</span>
+                                <span class="o_stat_text">Database</span>
+                            </div>
+                        </button>
+                        <button name="toggle_use_extended_database"
+                                invisible="use_extended_database"
+                                class="oe_stat_button"
+                                type="object" icon="fa-file-o">
+                            <div class="o_stat_info o_field_widget">
+                                <span class="o_stat_text o_warning_text fw-bold">Current</span>
+                                <span class="o_stat_text">Database</span>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="oe_title pe-0">
+                        <h1 class="d-flex justify-content-between align-items-center">
+                            <div class="d-flex w-100">
+                                <field name="is_production" widget="boolean_favorite" class="me-3" readonly="1"/>
+                                <field name="name" options="{'line_breaks': False}" widget="text" class="o_task_name text-truncate w-md-75 w-100 pe-2" placeholder="Назва моделі..."/>
+                            </div>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Історичні Дані">
+                            <field name="csv_file" filename="csv_filename"/>
+                            <field name="csv_filename" invisible="1"/>
+                            <div colspan="2" class="text-muted" invisible="csv_file">
+                                Завантажте CSV-файл з історичними даними для навчання моделі.
+                            </div>
+                        </group>
+                        <group string="Параметри розділення даних">
+                            <field name="train_size"/>
+                            <field name="test_size"/>
+                            <div colspan="2" class="text-muted">
+                                Встановіть відсоток даних, які використовуватимуться для навчання. Решту даних буде
+                                використано для
+                                тестування.
+                            </div>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Параметри моделі">
+                            <group string="Параметри моделі">
+                                <group string="Базові параметри замовлення">
+                                    <field name="use_order_amount"/>
+                                    <field name="use_partner_avg_amount"/>
+                                    <field name="use_partner_success_avg_amount"/>
+                                    <field name="use_partner_fail_avg_amount"/>
+                                </group>
+                                <group string="Параметри повідомлень та змін">
+                                    <field name="use_partner_success_avg_messages"/>
+                                    <field name="use_partner_fail_avg_messages"/>
+                                    <field name="use_partner_success_avg_changes"/>
+                                    <field name="use_partner_fail_avg_changes"/>
+                                </group>
+                                <group string="Загальні параметри партнера">
+                                    <field name="use_partner_success_rate"/>
+                                    <field name="use_partner_total_orders"/>
+                                    <field name="use_partner_order_age_days"/>
+                                    <field name="use_partner_total_messages"/>
+                                    <field name="use_partner_avg_changes"/>
+                                </group>
+                                <group string="Кількість повідомлень та змін">
+                                    <hr><i>не відомо під час створення</i></hr>
+                                    <field name="use_order_messages"/>
+                                    <field name="use_order_changes"/>
+                                    <hr/>
+                                </group>
+                                <div colspan="2" class="text-muted">
+                                    Оберіть параметри, які будуть використовуватись для побудови моделі.
+                                    Розрахункові параметри будуть створені автоматично на основі обраних базових
+                                    параметрів.
+                                </div>
+                            </group>
+                        </page>
+                        <page string="Результати" invisible="state != 'trained'">
+                            <group>
+                                <group string="Тренувальні метрики">
+                                    <field name="xgb_train_confusion_matrix_log"
+                                           nolabel="1"
+                                           invisible="not xgb_train_confusion_matrix_log"/>
+                                    <field name="xgb_train_accuracy"/>
+                                    <field name="xgb_train_precision"/>
+                                    <field name="xgb_train_recall"/>
+                                    <field name="xgb_train_f1_score"/>
+                                    <field name="xgb_train_roc_auc"/>
+
+                                </group>
+                                <group string="Тестові метрики">
+                                    <field name="xgb_test_confusion_matrix_log"
+                                           nolabel="1"
+                                           invisible="not xgb_test_confusion_matrix_log"/>
+                                    <field name="xgb_test_accuracy"/>
+                                    <field name="xgb_test_precision"/>
+                                    <field name="xgb_test_recall"/>
+                                    <field name="xgb_test_f1_score"/>
+                                    <field name="xgb_test_roc_auc"/>
+
+                                </group>
+                            </group>
+                            <group>
+                                <field name="xgb_feature_importance" nolabel="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- List View -->
+    <record id="view_inventory_prediction_model_list" model="ir.ui.view">
+        <field name="name">inventory.prediction.model.list</field>
+        <field name="model">inventory.prediction.model</field>
+        <field name="arch" type="xml">
+            <list string="Моделі прогнозування запасів">
+                <field name="is_production" widget="boolean_favorite" nolabel="1" readonly="1"/>
+                <field name="name"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_inventory_prediction_model" model="ir.actions.act_window">
+        <field name="name">Моделі прогнозування запасів</field>
+        <field name="res_model">inventory.prediction.model</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Створіть першу модель прогнозування запасів
+            </p>
+        </field>
+    </record>
+</odoo>

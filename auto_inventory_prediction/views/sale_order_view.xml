@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="prediction_view_order_form" model="ir.ui.view">
+        <field name="name">prediction.sale.order.form</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Predictions" name="predictions" invisible="is_success_provided == False">
+                    <group>
+                        <group>
+                            <field name="is_success_provided" readonly="1" invisible="1"/>
+                            <field name="success_prediction" readonly="1"/>
+                            <field name="last_prediction_date" readonly="1"/>
+                            <field name="prediction_log" readonly="1"/>
+                        </group>
+                    </group>
+                    <separator string="Важливість ознак" invisible="features_importance == False"/>
+                    <field name="features_importance" readonly="1" nolabel="1"
+                           invisible="features_importance == False"/>
+                </page>
+            </xpath>
+            <xpath expr="//sheet" position="inside">
+                <div style="position: absolute; top: 10px; right: 20px; z-index: 1000;"
+                     invisible="success_prediction_display == False">
+                    <field name="success_prediction_display" nolabel="1" readonly="1"/>
+                </div>
+            </xpath>
+        </field>
+    </record>
+</odoo>

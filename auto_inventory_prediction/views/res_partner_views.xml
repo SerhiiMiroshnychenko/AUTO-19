@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="extended_view_partner_form" model="ir.ui.view">
+            <field name="name">extended.res.partner.form</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_partner_form"/>
+            <field name="priority" eval="99"/>
+            <field name="arch" type="xml">
+                <xpath expr="//notebook" position="inside">
+                    <page string="Extended Information" name="extended_information" groups="base.group_no_one">
+
+                        <group invisible="extended_id == False">
+                            <group>
+
+                                <field name="extended_partner_success_rate" readonly="1"/>
+                                <field name="extended_partner_total_orders" readonly="1"/>
+                                <field name="extended_partner_order_age_days" readonly="1"/>
+                                <hr/>
+                            </group>
+                            <group>
+                                <field name="extended_partner_avg_amount" readonly="1"/>
+                                <field name="extended_partner_success_avg_amount" readonly="1"/>
+                                <field name="extended_partner_fail_avg_amount" readonly="1"/>
+                                <hr/>
+                                <field name="extended_partner_total_messages" readonly="1"/>
+                                <field name="extended_partner_success_avg_messages" readonly="1"/>
+                                <field name="extended_partner_fail_avg_messages" readonly="1"/>
+                                <hr/>
+                                <field name="extended_partner_avg_changes" readonly="1"/>
+                                <field name="extended_partner_success_avg_changes" readonly="1"/>
+                                <field name="extended_partner_fail_avg_changes" readonly="1"/>
+                            </group>
+                        </group>
+                        <group>
+                            <hr/>
+                            <field name="extended_id"/>
+                            <button name="action_sync_extended_from_legacy"
+                                    string="Sync from legacy (Extended ID)"
+                                    type="object"
+                                    class="oe_highlight"/>
+                        </group>
+                    </page>
+                    <page string="Local DB Information" name="local_information" groups="base.group_no_one">
+                        <group>
+                            <group>
+                                <field name="local_partner_success_rate" readonly="1"/>
+                                <field name="local_partner_total_orders" readonly="1"/>
+                                <field name="local_partner_order_age_days" readonly="1"/>
+                                <hr/>
+                            </group>
+                            <group>
+                                <field name="local_partner_avg_amount" readonly="1"/>
+                                <field name="local_partner_success_avg_amount" readonly="1"/>
+                                <field name="local_partner_fail_avg_amount" readonly="1"/>
+                                <hr/>
+                                <field name="local_partner_total_messages" readonly="1"/>
+                                <field name="local_partner_success_avg_messages" readonly="1"/>
+                                <field name="local_partner_fail_avg_messages" readonly="1"/>
+                                <hr/>
+                                <field name="local_partner_avg_changes" readonly="1"/>
+                                <field name="local_partner_success_avg_changes" readonly="1"/>
+                                <field name="local_partner_fail_avg_changes" readonly="1"/>
+                            </group>
+                        </group>
+                    </page>
+                    <page string="Customer statistics" name="customer_statistics">
+                        <group>
+                            <group>
+                                <field name="total_partner_success_rate" readonly="1"/>
+                                <field name="total_partner_total_orders" readonly="1"/>
+                                <field name="total_partner_order_age_days" readonly="1"/>
+                                <hr/>
+                            </group>
+                            <group>
+                                <field name="total_partner_avg_amount" readonly="1"/>
+                                <field name="total_partner_success_avg_amount" readonly="1"/>
+                                <field name="total_partner_fail_avg_amount" readonly="1"/>
+                                <hr/>
+                                <field name="total_partner_total_messages" readonly="1"/>
+                                <field name="total_partner_success_avg_messages" readonly="1"/>
+                                <field name="total_partner_fail_avg_messages" readonly="1"/>
+                                <hr/>
+                                <field name="total_partner_avg_changes" readonly="1"/>
+                                <field name="total_partner_success_avg_changes" readonly="1"/>
+                                <field name="total_partner_fail_avg_changes" readonly="1"/>
+                            </group>
+                        </group>
+                    </page>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

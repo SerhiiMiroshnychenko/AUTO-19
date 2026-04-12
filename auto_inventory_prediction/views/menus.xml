@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Root menu -->
+    <menuitem
+        id="menu_auto_inventory_prediction_root"
+        name="Auto Inventory Prediction"
+        web_icon="auto_inventory_prediction,static/description/icon.png"
+        sequence="31"
+    />
+
+    <!-- Prediction Models -->
+    <menuitem
+        id="menu_prediction_models"
+        name="Prediction Models"
+        parent="menu_auto_inventory_prediction_root"
+        action="action_inventory_prediction_model"
+        sequence="10"
+    />
+</odoo>

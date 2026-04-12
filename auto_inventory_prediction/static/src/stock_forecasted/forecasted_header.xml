@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-inherit="stock.ForecastedHeader" t-inherit-mode="extension">
+        <xpath expr="//div[@class='row']" position="replace">
+            <div class="row text-center">
+                <div class="col-md-auto justify-content-center">
+                    <div class="h3">
+                        <a href="#"
+                            t-on-click.prevent="() => this._onClickInventory()"
+                           t-out="_formatFloat(this.props.docs.quantity_on_hand)"/>
+                    </div>
+                    <div>On Hand</div>
+                </div>
+                <div class="h3 col-md-auto text-center">+</div>
+                <div t-attf-class="col-md-auto text-center #{props.docs.incoming_qty}">
+                    <div class="h3">
+                        <t t-out="_formatFloat(this.props.docs.incoming_onhand_qty)"/>
+                    </div>
+                    <div>Manufacturable</div>
+                </div>
+                <div class="h3 col-md-auto text-center">+</div>
+                <div t-attf-class="col-md-auto text-center #{props.docs.incoming_qty}">
+                    <div class="h3">
+                        <t t-out="_formatFloat(this.props.docs.incoming_inbound_qty)"/>
+                    </div>
+                    <div>Incoming</div>
+                </div>
+                <div class="h3 col-md-auto text-center">-</div>
+                <div t-attf-class="col-md-auto text-center #{props.docs.outgoing_qty}">
+                    <div class="h3">
+                        <t t-out="_formatFloat(this.props.docs.outgoing_qty)"/>
+                    </div>
+                    <div>Outgoing</div>
+                </div>
+                <div class="h3 col-md-auto text-center">-</div>
+                <div class="col-md-auto text-center">
+                    <div class="h3">
+                        <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_qty)"/>
+                    </div>
+                    <div>Outgoing (Unconfirmed)</div>
+                </div>
+                
+                <div class="h3 col-md-auto text-center">=</div>
+                <div t-attf-class="col-md-auto text-center #{props.docs.virtual_available_real &lt; 0 and 'text-danger'}" name="forecasted_value">
+                    <div class="h3">
+                        <span t-out="_formatFloat(this.props.docs.virtual_available_real)"/>
+                    </div>
+                    <div>Forecasted</div>
+                </div>
+                <div class="h3 col-md-auto text-center">+</div>
+                <div class="col-md-auto text-center">
+                    <div class="h3">
+                        <t t-out="_formatFloat(this.props.docs.incoming_missing_qty)"/>
+                    </div>
+                    <div>Missing Components</div>
+                </div>
+            </div>
+        </xpath>
+    </t>
+</templates>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="stock.ForecastedDetails" t-inherit-mode="extension">
+        <xpath expr="//thead[tr[@class='o_forecasted_row bg-200']/td[text()='Forecasted Inventory']]" position="before">
+           <thead>
+                <tr class="o_forecasted_row bg-200">
+                    <td colspan="2">Incoming number of products</td>
+                    <td t-if="props.docs.multiple_product"/>
+                    <td class="text-end">
+                        <t t-out="_formatFloat(this.props.docs.incoming_qty)"/>
+                    </td>
+                    <td colspan="2"/>
+                </tr>
+            </thead>
+        </xpath>
+
+        <xpath expr="//thead[tr[@class='o_forecasted_row bg-200']/td[text()='Forecasted Inventory']]" position="after">
+            <tbody>
+                <t t-foreach="props.docs.draft_sale_orders" t-as="sale_order" t-key="sale_order_index">
+                    <tr name="ml_draft_so_out">
+                        <td colspan="2">
+                            <a t-attf-href="#" t-out="sale_order.name"
+                                class="fw-bold"
+                                t-on-click.prevent="() => this.props.openView('sale.order', 'form', sale_order.id)"/>
+                        </td>
+                        <td t-if="props.docs.multiple_product"/>
+                        <td t-out="_formatFloat(-sale_order.final_value)" class="text-end"/>
+                        <td colspan="2"> 
+                            <t t-out="_formatFloat(-sale_order.original_value)"/> 
+                            x <t t-out="sale_order.ml_probability"/> 
+                            = <t t-out="_formatFloat(-sale_order.modified_value)"/>
+                            <t t-if="sale_order.no_delivery_batches"> 
+                                / <t t-out="sale_order.no_delivery_batches"/> Batches 
+                                = <t t-out="_formatFloat(-sale_order.final_value)"/> 
+                            </t>
+                        </td>
+                    </tr>
+                </t>
+            </tbody>
+        </xpath>
+        
+    </t>
+</templates>
