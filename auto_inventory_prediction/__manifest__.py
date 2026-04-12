@@ -31,7 +31,6 @@
         'views/product_views.xml',
         'views/mrp_production_views.xml',
         'views/purchase_order_views.xml',
-        'views/stock_orderpoint_views.xml',
         'views/menus.xml',
         'data/ir_cron.xml',
     ],
