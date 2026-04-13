@@ -274,6 +274,37 @@
                         </div>
                     </div>
                 </div>
+                <div class="col-12 mt-2">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">Formula Component Reference</div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped table-bordered align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Formula Term</th>
+                                    <th>Source / Default Odoo Mapping</th>
+                                    <th>Meaning</th>
+                                    <th class="text-end">Current Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr t-foreach="this.props.docs.formula_explanations" t-as="row" t-key="row.term">
+                                    <td class="fw-semibold">
+                                        <t t-out="row.term"/>
+                                    </td>
+                                    <td>
+                                        <t t-out="row.source"/>
+                                    </td>
+                                    <td class="text-start">
+                                        <t t-out="row.meaning"/>
+                                    </td>
+                                    <td class="text-end fw-semibold">
+                                        <t t-out="_formatFloat(row.value)"/>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </xpath>
     </t>
