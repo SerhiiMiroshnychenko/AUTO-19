@@ -8,9 +8,9 @@
             <field name="priority" eval="15" />
             <field name="arch" type="xml">
                 <data>
-                    <!-- Replace virtual_available with virtual_available_real -->
-                    <xpath expr="//field[@name='virtual_available']" position="replace">
-                        <field name="virtual_available_real" nolabel="1" class="oe_inline" />
+                    <xpath expr="//field[@name='virtual_available']" position="after">
+                        <field name="virtual_available_ml" nolabel="1" class="oe_inline" />
+                        <field name="incoming_missing_qty" nolabel="1" class="oe_inline" />
                     </xpath>
 
                     <!-- Add legacy name mapping after barcode -->
@@ -28,8 +28,9 @@
             <field name="priority" eval="15" />
             <field name="arch" type="xml">
                 <data>
-                    <xpath expr="//field[@name='virtual_available']" position="replace">
-                        <field name="virtual_available_real" nolabel="1" class="oe_inline" />
+                    <xpath expr="//field[@name='virtual_available']" position="after">
+                        <field name="virtual_available_ml" nolabel="1" class="oe_inline" />
+                        <field name="incoming_missing_qty" nolabel="1" class="oe_inline" />
                     </xpath>
 
                     <!-- Add legacy name mapping after barcode -->
@@ -65,9 +66,11 @@
             <field name="arch" type="xml">
                 <xpath expr="//field[@name='virtual_available']" position="after">
                     <field name="unconfirmed_outgoing_qty" string="Unconfirmed Out" optional="hide"/>
-                    <field name="virtual_available_real" string="Virtual Real" optional="show"/>
+                    <field name="virtual_available_ml" string="Virtual ML" optional="show"/>
+                    <field name="virtual_available_real" string="Forecasted ML" optional="hide"/>
                     <field name="incoming_onhand_qty" string="Inc. On-Hand" optional="hide"/>
                     <field name="incoming_inbound_qty" string="Inc. Inbound" optional="hide"/>
+                    <field name="incoming_missing_qty" string="Missing Components" optional="hide"/>
                     <field name="virtual_onhand_qty" string="Virtual On-Hand" optional="hide"/>
                     <field name="old_name" string="Назва в старій базі" optional="hide"/>
                 </xpath>

@@ -3,57 +3,276 @@
 
     <t t-inherit="stock.ForecastedHeader" t-inherit-mode="extension">
         <xpath expr="//div[@class='row']" position="replace">
-            <div class="row text-center">
-                <div class="col-md-auto justify-content-center">
-                    <div class="h3">
-                        <a href="#"
-                            t-on-click.prevent="() => this._onClickInventory()"
-                           t-out="_formatFloat(this.props.docs.quantity_on_hand)"/>
+            <div class="row text-center align-items-start g-3">
+                <div class="col-12">
+                    <div class="border rounded p-3 bg-light-subtle">
+                        <div class="text-uppercase fw-bold small text-muted mb-2">Final Forecast Formula</div>
+                        <div class="row text-center justify-content-center align-items-center g-2">
+                            <div class="col-md-auto justify-content-center">
+                                <div class="h2 text-info-emphasis">
+                                    <a href="#"
+                                        t-on-click.prevent="() => this._onClickInventory()"
+                                       t-out="_formatFloat(this.props.docs.qty_available)"/>
+                                </div>
+                                <div><strong>On Hand</strong></div>
+                            </div>
+                            <div class="h2 col-md-auto text-center">+</div>
+                            <div class="col-md-auto text-center">
+                                <div class="h2 text-success">
+                                    <t t-out="_formatFloat(this.props.docs.incoming_reliable_qty)"/>
+                                </div>
+                                <div><strong>Reliable Incoming</strong></div>
+                            </div>
+                            <div class="h2 col-md-auto text-center">-</div>
+                            <div class="col-md-auto text-center">
+                                <div class="h2 text-body-emphasis">
+                                    <t t-out="_formatFloat(this.props.docs.outgoing_qty)"/>
+                                </div>
+                                <div><strong>Outgoing</strong></div>
+                            </div>
+                            <div class="h2 col-md-auto text-center">-</div>
+                            <div class="col-md-auto text-center">
+                                <div class="h2 text-warning-emphasis">
+                                    <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_qty)"/>
+                                </div>
+                                <div><strong>Outgoing (Unconfirmed, ML)</strong></div>
+                            </div>
+                            <div class="h2 col-md-auto text-center">=</div>
+                            <div t-attf-class="col-md-auto text-center #{props.docs.virtual_available_ml_reliable &lt; 0 and 'text-danger'}" name="forecasted_value">
+                                <div class="h1">
+                                    <span t-out="_formatFloat(this.props.docs.virtual_available_ml_reliable)"/>
+                                </div>
+                                <div><strong>Final Reliable ML Forecast</strong></div>
+                            </div>
+                        </div>
                     </div>
-                    <div>On Hand</div>
                 </div>
-                <div class="h3 col-md-auto text-center">+</div>
-                <div t-attf-class="col-md-auto text-center #{props.docs.incoming_qty}">
-                    <div class="h3">
-                        <t t-out="_formatFloat(this.props.docs.incoming_onhand_qty)"/>
+                <div class="col-12">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">Scheduled Stock Logic</div>
+                    <div class="row text-center justify-content-center align-items-center g-2">
+                        <div class="col-md-auto justify-content-center">
+                            <div class="h4 text-info-emphasis">
+                                <a href="#"
+                                    t-on-click.prevent="() => this._onClickInventory()"
+                                   t-out="_formatFloat(this.props.docs.qty_available)"/>
+                            </div>
+                            <div>On Hand</div>
+                        </div>
+                        <div class="h4 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h4 text-primary">
+                                <t t-out="_formatFloat(this.props.docs.incoming_qty)"/>
+                            </div>
+                            <div>Scheduled Incoming</div>
+                        </div>
+                        <div class="h4 col-md-auto text-center">-</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h4 text-body-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.outgoing_qty)"/>
+                            </div>
+                            <div>Outgoing</div>
+                        </div>
+                        <div class="h4 col-md-auto text-center">=</div>
+                        <div t-attf-class="col-md-auto text-center #{props.docs.standard_forecast_scheduled &lt; 0 and 'text-danger'}">
+                            <div class="h4">
+                                <span t-out="_formatFloat(this.props.docs.standard_forecast_scheduled)"/>
+                            </div>
+                            <div>Standard Forecast</div>
+                        </div>
                     </div>
-                    <div>Manufacturable</div>
                 </div>
-                <div class="h3 col-md-auto text-center">+</div>
-                <div t-attf-class="col-md-auto text-center #{props.docs.incoming_qty}">
-                    <div class="h3">
-                        <t t-out="_formatFloat(this.props.docs.incoming_inbound_qty)"/>
+                <div class="col-12">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">Incoming Decomposition</div>
+                    <div class="row text-center justify-content-center align-items-center g-2">
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-success">
+                                <t t-out="_formatFloat(this.props.docs.incoming_non_mo_qty)"/>
+                            </div>
+                            <div>Non-MO Incoming</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-primary">
+                                <t t-out="_formatFloat(this.props.docs.incoming_mo_scheduled_qty)"/>
+                            </div>
+                            <div>Scheduled MO Incoming</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">=</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-primary-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.incoming_qty)"/>
+                            </div>
+                            <div>Total Scheduled Incoming</div>
+                        </div>
                     </div>
-                    <div>Incoming</div>
                 </div>
-                <div class="h3 col-md-auto text-center">-</div>
-                <div t-attf-class="col-md-auto text-center #{props.docs.outgoing_qty}">
-                    <div class="h3">
-                        <t t-out="_formatFloat(this.props.docs.outgoing_qty)"/>
+                <div class="col-12">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">Manufacturing Feasibility</div>
+                    <div class="row text-center justify-content-center align-items-center g-2">
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-info-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.incoming_onhand_qty)"/>
+                            </div>
+                            <div>MO Feasible from On-Hand Components</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-info">
+                                <t t-out="_formatFloat(this.props.docs.incoming_component_inbound_qty)"/>
+                            </div>
+                            <div>MO Feasible from Inbound Components</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">=</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-success-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.feasibility_qty)"/>
+                            </div>
+                            <div>Total Feasible MO Incoming</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">|</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-danger">
+                                <t t-out="_formatFloat(this.props.docs.incoming_mo_unfeasible_qty)"/>
+                            </div>
+                            <div>Unsupported MO Incoming</div>
+                        </div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-danger-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.incoming_missing_qty)"/>
+                            </div>
+                            <div>Missing Components</div>
+                        </div>
                     </div>
-                    <div>Outgoing</div>
                 </div>
-                <div class="h3 col-md-auto text-center">-</div>
-                <div class="col-md-auto text-center">
-                    <div class="h3">
-                        <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_qty)"/>
+                <div class="col-12">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">Reliable Forecast Logic</div>
+                    <div class="row text-center justify-content-center align-items-center g-2">
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-info-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.qty_available)"/>
+                            </div>
+                            <div>On Hand</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-success">
+                                <t t-out="_formatFloat(this.props.docs.incoming_reliable_qty)"/>
+                            </div>
+                            <div>Reliable Incoming</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">-</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-body-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.outgoing_qty)"/>
+                            </div>
+                            <div>Outgoing</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">=</div>
+                        <div t-attf-class="col-md-auto text-center #{props.docs.standard_forecast_reliable &lt; 0 and 'text-danger'}">
+                            <div class="h3">
+                                <span t-out="_formatFloat(this.props.docs.standard_forecast_reliable)"/>
+                            </div>
+                            <div>Reliable Standard Forecast</div>
+                        </div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-danger-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.standard_forecast_gap)"/>
+                            </div>
+                            <div>Scheduled-Reliable Gap</div>
+                        </div>
                     </div>
-                    <div>Outgoing (Unconfirmed)</div>
                 </div>
-                
-                <div class="h3 col-md-auto text-center">=</div>
-                <div t-attf-class="col-md-auto text-center #{props.docs.virtual_available_real &lt; 0 and 'text-danger'}" name="forecasted_value">
-                    <div class="h3">
-                        <span t-out="_formatFloat(this.props.docs.virtual_available_real)"/>
+                <div class="col-12">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">ML Adjustment Logic</div>
+                    <div class="row text-center justify-content-center align-items-center g-2">
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-success-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.standard_forecast_reliable)"/>
+                            </div>
+                            <div>Reliable Standard Forecast</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">-</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-warning-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_qty)"/>
+                            </div>
+                            <div>Outgoing (Unconfirmed, ML)</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">=</div>
+                        <div t-attf-class="col-md-auto text-center #{props.docs.virtual_available_ml_reliable &lt; 0 and 'text-danger'}">
+                            <div class="h3">
+                                <span t-out="_formatFloat(this.props.docs.virtual_available_ml_reliable)"/>
+                            </div>
+                            <div>Reliable ML Forecast</div>
+                        </div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-primary">
+                                <t t-out="_formatFloat(this.props.docs.virtual_available_ml)"/>
+                            </div>
+                            <div>Scheduled ML Forecast</div>
+                        </div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-danger-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.ml_forecast_gap)"/>
+                            </div>
+                            <div>ML Forecast Gap</div>
+                        </div>
                     </div>
-                    <div>Forecasted</div>
                 </div>
-                <div class="h3 col-md-auto text-center">+</div>
-                <div class="col-md-auto text-center">
-                    <div class="h3">
-                        <t t-out="_formatFloat(this.props.docs.incoming_missing_qty)"/>
+                <div class="col-12">
+                    <div class="text-uppercase fw-bold small text-muted mb-2">Odoo Replenishment View</div>
+                    <div class="row text-center justify-content-center align-items-center g-2">
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-primary-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.standard_forecast)"/>
+                            </div>
+                            <div>Odoo Replenishment Base Forecast</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-success">
+                                <t t-out="_formatFloat(this.props.docs.purchase_in_progress)"/>
+                            </div>
+                            <div>PO In Progress</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-info">
+                                <t t-out="_formatFloat(this.props.docs.mo_draft_in_progress)"/>
+                            </div>
+                            <div>Draft MO In Progress</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-info-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.mo_confirmed_in_progress)"/>
+                            </div>
+                            <div>Confirmed MO In Progress</div>
+                        </div>
+                        <div class="h3 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h3 text-secondary-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.kit_in_progress)"/>
+                            </div>
+                            <div>Kit In Progress</div>
+                        </div>
+                        <t t-if="this.props.docs.enterprise_in_progress">
+                            <div class="h3 col-md-auto text-center">+</div>
+                            <div class="col-md-auto text-center">
+                                <div class="h3 text-secondary">
+                                    <t t-out="_formatFloat(this.props.docs.enterprise_in_progress)"/>
+                                </div>
+                                <div>Enterprise In Progress</div>
+                            </div>
+                        </t>
+                        <div class="h3 col-md-auto text-center">=</div>
+                        <div t-attf-class="col-md-auto text-center #{props.docs.replenishment_forecast &lt; 0 and 'text-danger'}">
+                            <div class="h3">
+                                <span t-out="_formatFloat(this.props.docs.replenishment_forecast)"/>
+                            </div>
+                            <div>Replenishment Forecast</div>
+                        </div>
                     </div>
-                    <div>Missing Components</div>
                 </div>
             </div>
         </xpath>

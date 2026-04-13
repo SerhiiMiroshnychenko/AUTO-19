@@ -22,6 +22,10 @@ class Product(models.Model):
         "Unconfirmed Outgoing", compute="_compute_quantities", compute_sudo=False
     )
 
+    virtual_available_ml = fields.Float(
+        "Virtual Available ML", compute="_compute_quantities", compute_sudo=False
+    )
+
     incoming_onhand_qty = fields.Float(
         "Incoming On-Hand", compute="_compute_quantities", compute_sudo=False
     )
@@ -74,6 +78,7 @@ class Product(models.Model):
         services.virtual_available = 0.0
         services.free_qty = 0.0
         services.unconfirmed_outgoing_qty = 0.0
+        services.virtual_available_ml = 0.0
         services.incoming_onhand_qty = 0.0
         services.incoming_inbound_qty = 0.0
         services.incoming_missing_qty = 0.0
@@ -98,9 +103,19 @@ class Product(models.Model):
             to_date, from_date
         )
         incoming_qties_dict = {product.id: res[product.id]["incoming_qty"] for product in self}
+        component_products = self._get_bom_component_products()
+        component_quantities = self._get_base_component_quantities_dict(
+            component_products,
+            lot_id,
+            owner_id,
+            package_id,
+            from_date,
+            to_date,
+        )
 
         incoming_breakdown_results = self._breakdown_incoming_quantities(
             incoming_qties_dict,
+            component_quantities,
             owner_id,
             to_date,
             from_date,
@@ -109,7 +124,7 @@ class Product(models.Model):
             p_res = res[product.id]
             unconfirmed = unconfirmed_results.get(product.id, {})
             p_res["unconfirmed_outgoing_qty"] = unconfirmed.get("qty", 0)
-            p_res["virtual_available"] = (
+            p_res["virtual_available_ml"] = (
                     p_res["virtual_available"] - p_res["unconfirmed_outgoing_qty"]
             )
 
@@ -120,11 +135,91 @@ class Product(models.Model):
             p_res["virtual_onhand_qty"] = (
                     p_res["qty_available"] + p_res["incoming_onhand_qty"]
             )
-            p_res["virtual_available_real"] = (
-                    p_res["virtual_available"] - p_res["incoming_missing_qty"]
-            )
+            p_res["virtual_available_real"] = p_res["virtual_available_ml"]
 
         return res
+
+    def _get_bom_component_products(self):
+        bom_lines = self.env["mrp.bom.line"].search([
+            ("bom_id.product_id", "in", self.ids),
+        ])
+        return bom_lines.product_id
+
+    def _get_base_component_quantities_dict(
+            self, component_products, lot_id, owner_id, package_id, from_date=False, to_date=False
+    ):
+        if not component_products:
+            return {}
+        return super(Product, component_products)._compute_quantities_dict(
+            lot_id, owner_id, package_id, from_date, to_date
+        )
+
+    def _get_detailed_forecast_breakdown(
+            self, lot_id=None, owner_id=None, package_id=None, from_date=False, to_date=False
+    ):
+        products = self.sudo()
+        if not products:
+            return {}
+        base_quantities = super(Product, products)._compute_quantities_dict(
+            lot_id, owner_id, package_id, from_date, to_date
+        )
+        unconfirmed_results = products._get_products_qty_in_unconfirmed_quotations(
+            to_date, from_date
+        )
+        incoming_qties_dict = {
+            product.id: base_quantities[product.id]["incoming_qty"]
+            for product in products
+        }
+        component_products = products._get_bom_component_products()
+        component_quantities = products._get_base_component_quantities_dict(
+            component_products,
+            lot_id,
+            owner_id,
+            package_id,
+            from_date,
+            to_date,
+        )
+        incoming_breakdown_results = products._breakdown_incoming_quantities(
+            incoming_qties_dict,
+            component_quantities,
+            owner_id,
+            to_date,
+            from_date,
+        )
+
+        detailed = {}
+        for product in products:
+            base = base_quantities[product.id]
+            unconfirmed = unconfirmed_results.get(product.id, {})
+            incoming = incoming_breakdown_results.get(product.id, {})
+            standard_forecast = base["virtual_available"]
+            ml_forecast = standard_forecast - unconfirmed.get("qty", 0)
+            reliable_standard_forecast = (
+                base["qty_available"]
+                + incoming.get("incoming_reliable_qty", 0.0)
+                - base["outgoing_qty"]
+            )
+            reliable_ml_forecast = reliable_standard_forecast - unconfirmed.get("qty", 0)
+            detailed[product.id] = {
+                "qty_available": base["qty_available"],
+                "incoming_qty": base["incoming_qty"],
+                "outgoing_qty": base["outgoing_qty"],
+                "virtual_available": standard_forecast,
+                "unconfirmed_outgoing_qty": unconfirmed.get("qty", 0.0),
+                "virtual_available_ml": ml_forecast,
+                "incoming_onhand_qty": incoming.get("incoming_onhand_qty", 0.0),
+                "incoming_inbound_qty": incoming.get("incoming_inbound_qty", 0.0),
+                "incoming_component_inbound_qty": incoming.get("incoming_component_inbound_qty", 0.0),
+                "incoming_missing_qty": incoming.get("incoming_missing_qty", 0.0),
+                "incoming_non_mo_qty": incoming.get("incoming_non_mo_qty", 0.0),
+                "incoming_mo_scheduled_qty": incoming.get("incoming_mo_scheduled_qty", 0.0),
+                "incoming_mo_feasible_qty": incoming.get("incoming_mo_feasible_qty", 0.0),
+                "incoming_mo_unfeasible_qty": incoming.get("incoming_mo_unfeasible_qty", 0.0),
+                "incoming_reliable_qty": incoming.get("incoming_reliable_qty", 0.0),
+                "standard_forecast_reliable": reliable_standard_forecast,
+                "virtual_available_ml_reliable": reliable_ml_forecast,
+            }
+        return detailed
 
     def _get_products_qty_in_unconfirmed_quotations(
             self, to_date=False, from_date=False
@@ -208,7 +303,7 @@ class Product(models.Model):
         return results
 
     def _breakdown_incoming_quantities(
-            self, incoming_qties, owner_id, to_date, from_date
+            self, incoming_qties, component_quantities, owner_id, to_date, from_date
     ):
         """Breakdown incoming quantities into onhand/inbound/missing (BOM-aware)"""
         sudo_self = self.sudo()
@@ -244,7 +339,13 @@ class Product(models.Model):
                     "incoming_onhand_qty": 0,
                     "incoming_qty": incoming_qty,
                     "incoming_inbound_qty": 0,
+                    "incoming_component_inbound_qty": 0,
                     "incoming_missing_qty": 0,
+                    "incoming_non_mo_qty": 0,
+                    "incoming_mo_scheduled_qty": 0,
+                    "incoming_mo_feasible_qty": 0,
+                    "incoming_mo_unfeasible_qty": 0,
+                    "incoming_reliable_qty": 0,
                 },
             )
 
@@ -253,6 +354,9 @@ class Product(models.Model):
 
             product_moves = moves.filtered(lambda move: move.product_id == product)
             product_mos = product_moves.production_id
+            result["incoming_mo_scheduled_qty"] = sum(
+                product_mos.move_finished_ids.filtered(lambda move: move.product_id == product).mapped("product_qty")
+            )
             qty_by_bom = {}
             for mo in product_mos:
                 if mo.bom_id not in qty_by_bom:
@@ -269,8 +373,8 @@ class Product(models.Model):
                     continue
 
                 valid_bom_lines = bom.bom_line_ids.filtered(
-                    lambda l: l.product_id.type == "consu"
-                              and not l.product_id.skip_when_computing_component_quantities
+                    lambda line: line.product_id.is_storable
+                              and not line.product_id.skip_when_computing_component_quantities
                 )
 
                 if not valid_bom_lines:
@@ -279,8 +383,7 @@ class Product(models.Model):
 
                 onhand = min(
                     float_round(
-                        (l.product_id.free_qty + l.product_id.incoming_onhand_qty)
-                        / l.product_qty,
+                        component_quantities.get(l.product_id.id, {}).get("free_qty", 0.0) / l.product_qty,
                         precision_rounding=product.uom_id.rounding,
                     )
                     for l in valid_bom_lines
@@ -289,7 +392,7 @@ class Product(models.Model):
 
                 inbound = min(
                     float_round(
-                        l.product_id.incoming_inbound_qty / l.product_qty,
+                        component_quantities.get(l.product_id.id, {}).get("incoming_qty", 0.0) / l.product_qty,
                         precision_rounding=product.uom_id.rounding,
                     )
                     for l in valid_bom_lines
@@ -299,7 +402,10 @@ class Product(models.Model):
 
                 result["incoming_onhand_qty"] += onhand
                 result["incoming_inbound_qty"] += inbound
+                result["incoming_component_inbound_qty"] += inbound
                 result["incoming_missing_qty"] += missing
+                result["incoming_mo_feasible_qty"] += onhand + inbound
+                result["incoming_mo_unfeasible_qty"] += missing
 
             # Non MO moves
             if incoming_qty > 0:
@@ -308,6 +414,11 @@ class Product(models.Model):
                     for move in (product_moves - product_mos.move_finished_ids)
                 )
                 result["incoming_inbound_qty"] += non_mo_qty
+                result["incoming_non_mo_qty"] += non_mo_qty
+
+            result["incoming_reliable_qty"] = (
+                result["incoming_non_mo_qty"] + result["incoming_mo_feasible_qty"]
+            )
 
         return results
 
@@ -323,6 +434,10 @@ class ProductTemplate(models.Model):
 
     unconfirmed_outgoing_qty = fields.Float(
         "Unconfirmed Outgoing", compute="_compute_quantities", compute_sudo=False
+    )
+
+    virtual_available_ml = fields.Float(
+        "Virtual Available ML", compute="_compute_quantities", compute_sudo=False
     )
 
     incoming_onhand_qty = fields.Float(
@@ -362,6 +477,7 @@ class ProductTemplate(models.Model):
         for template in self:
             t_res = res[template.id]
             template.unconfirmed_outgoing_qty = t_res["unconfirmed_outgoing_qty"]
+            template.virtual_available_ml = t_res["virtual_available_ml"]
             template.incoming_onhand_qty = t_res["incoming_onhand_qty"]
             template.incoming_inbound_qty = t_res["incoming_inbound_qty"]
             template.incoming_missing_qty = t_res["incoming_missing_qty"]
@@ -375,6 +491,7 @@ class ProductTemplate(models.Model):
             for p in self.product_variant_ids._origin.read(
                 [
                     "unconfirmed_outgoing_qty",
+                    "virtual_available_ml",
                     "incoming_onhand_qty",
                     "incoming_inbound_qty",
                     "incoming_missing_qty",
@@ -385,6 +502,7 @@ class ProductTemplate(models.Model):
         }
         for template in self:
             unconfirmed_outgoing_qty = 0
+            virtual_available_ml = 0
             incoming_onhand_qty = 0
             incoming_inbound_qty = 0
             incoming_missing_qty = 0
@@ -392,6 +510,7 @@ class ProductTemplate(models.Model):
             virtual_available_real = 0
             for p in template.product_variant_ids._origin:
                 unconfirmed_outgoing_qty += variants_available[p.id]["unconfirmed_outgoing_qty"]
+                virtual_available_ml += variants_available[p.id]["virtual_available_ml"]
                 incoming_onhand_qty += variants_available[p.id]["incoming_onhand_qty"]
                 incoming_inbound_qty += variants_available[p.id]["incoming_inbound_qty"]
                 incoming_missing_qty += variants_available[p.id]["incoming_missing_qty"]
@@ -399,6 +518,7 @@ class ProductTemplate(models.Model):
                 virtual_available_real += variants_available[p.id]["virtual_available_real"]
             t_res = res[template.id]
             t_res["unconfirmed_outgoing_qty"] = unconfirmed_outgoing_qty
+            t_res["virtual_available_ml"] = virtual_available_ml
             t_res["incoming_onhand_qty"] = incoming_onhand_qty
             t_res["incoming_inbound_qty"] = incoming_inbound_qty
             t_res["incoming_missing_qty"] = incoming_missing_qty

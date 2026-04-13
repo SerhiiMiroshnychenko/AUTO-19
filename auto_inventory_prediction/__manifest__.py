@@ -19,6 +19,7 @@
         'web',
         'stock',
         'sale',
+        'sale_stock',
         'contacts',
         'mrp',
         'purchase',
