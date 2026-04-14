@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <record id="view_ml_demand_wave_tree" model="ir.ui.view">
-        <field name="name">ml.demand.wave.tree</field>
+    <record id="view_ml_demand_wave_list" model="ir.ui.view">
+        <field name="name">ml.demand.wave.list</field>
         <field name="model">ml.demand.wave</field>
         <field name="arch" type="xml">
-            <tree>
+            <list>
                 <field name="name"/>
                 <field name="demand_uid"/>
                 <field name="warehouse_id"/>
@@ -12,7 +12,7 @@
                 <field name="horizon_date_to"/>
                 <field name="state"/>
                 <field name="create_date"/>
-            </tree>
+            </list>
         </field>
     </record>
 
@@ -39,7 +39,7 @@
                     <notebook>
                         <page string="Demand Lines">
                             <field name="line_ids" nolabel="1">
-                                <tree>
+                                <list>
                                     <field name="source_sale_order_id"/>
                                     <field name="source_product_id"/>
                                     <field name="target_product_id"/>
@@ -48,18 +48,18 @@
                                     <field name="covered_qty"/>
                                     <field name="effective_qty"/>
                                     <field name="is_active"/>
-                                </tree>
+                                </list>
                             </field>
                         </page>
                         <page string="Coverage">
                             <field name="coverage_ids" nolabel="1">
-                                <tree>
+                                <list>
                                     <field name="demand_line_id"/>
                                     <field name="covered_model"/>
                                     <field name="covered_res_id"/>
                                     <field name="covered_qty"/>
                                     <field name="coverage_state"/>
-                                </tree>
+                                </list>
                             </field>
                         </page>
                     </notebook>
@@ -71,7 +71,7 @@
     <record id="action_ml_demand_wave" model="ir.actions.act_window">
         <field name="name">ML Demand Waves</field>
         <field name="res_model">ml.demand.wave</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
     </record>
 
     <menuitem id="menu_ml_demand_root"
