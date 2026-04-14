@@ -38,9 +38,10 @@ class MlDemandWave(models.Model):
     line_ids = fields.One2many("ml.demand.line", "wave_id")
     coverage_ids = fields.One2many("ml.demand.coverage", "wave_id")
 
-    _sql_constraints = [
-        ("ml_demand_wave_uid_uniq", "unique(demand_uid)", "Demand UID must be unique."),
-    ]
+    _demand_uid_uniq = models.Constraint(
+        "UNIQUE(demand_uid)",
+        "Demand UID must be unique.",
+    )
 
     @api.model
     def _normalize_to_date(self, to_date=False):
@@ -60,7 +61,12 @@ class MlDemandWave(models.Model):
 
     @api.model
     def get_or_build_active_wave(self, warehouse_id=False, from_date=False, to_date=False):
-        warehouse = self.env["stock.warehouse"].browse(warehouse_id) if warehouse_id else self.env["stock.warehouse"].search([], limit=1)
+        sudo_self = self.sudo()
+        warehouse = (
+            sudo_self.env["stock.warehouse"].browse(warehouse_id)
+            if warehouse_id
+            else sudo_self.env["stock.warehouse"].search([], limit=1)
+        )
         if not warehouse:
             return self.env["ml.demand.wave"]
 
@@ -77,53 +83,81 @@ class MlDemandWave(models.Model):
         else:
             domain.append(("horizon_date_from", "=", False))
 
-        wave = self.search(domain, limit=1)
+        wave = sudo_self.search(domain, limit=1)
         if wave:
-            wave.recompute_coverages()
-            return wave
-        return self.build_wave_from_quotations(
+            # Keep active wave synchronized with current quotation snapshot.
+            wave.rebuild_from_quotations()
+            return self.browse(wave.id)
+        wave = sudo_self.build_wave_from_quotations(
             warehouse_id=warehouse.id,
             from_date=norm_from_date,
             to_date=norm_to_date,
         )
+        return self.browse(wave.id)
 
     @api.model
     def build_wave_from_quotations(self, warehouse_id=False, from_date=False, to_date=False):
-        warehouse = self.env["stock.warehouse"].browse(warehouse_id) if warehouse_id else self.env["stock.warehouse"].search([], limit=1)
+        sudo_self = self.sudo()
+        warehouse = (
+            sudo_self.env["stock.warehouse"].browse(warehouse_id)
+            if warehouse_id
+            else sudo_self.env["stock.warehouse"].search([], limit=1)
+        )
         if not warehouse:
             return self.env["ml.demand.wave"]
 
         norm_to_date = self._normalize_to_date(to_date)
         norm_from_date = self._normalize_from_date(from_date)
         uid = str(uuid4())
-        wave = self.create(
+        wave = sudo_self.create(
             {
                 "name": f"ML Wave {fields.Datetime.now()}",
                 "demand_uid": uid,
                 "warehouse_id": warehouse.id,
-                "company_id": self.env.company.id,
+                "company_id": sudo_self.env.company.id,
                 "horizon_date_from": norm_from_date or False,
                 "horizon_date_to": norm_to_date,
                 "state": "draft",
             }
         )
+        wave.rebuild_from_quotations()
+        wave.state = "active"
+        return wave
+
+    def rebuild_from_quotations(self):
+        for wave in self:
+            wave._rebuild_single_wave_from_quotations()
+        return True
+
+    def _rebuild_single_wave_from_quotations(self):
+        self.ensure_one()
+        sudo_wave = self.sudo()
+        legacy_lines_without_key = sudo_wave.line_ids.filtered(lambda line: not line.demand_key)
+        for legacy_line in legacy_lines_without_key:
+            legacy_line.demand_key = f"legacy:{legacy_line.id}"
+        # Refresh line universe with UPSERT semantics:
+        # update existing by stable key, create new, deactivate stale.
+        existing_lines = {
+            line.demand_key: line for line in sudo_wave.line_ids
+        }
+        desired_by_key = {}
 
         quotation_domain = [
             ("state", "not in", ["sale", "cancel"]),
             ("is_success_provided", "=", True),
-            ("company_id", "=", self.env.company.id),
-            ("warehouse_id", "=", warehouse.id),
+            ("company_id", "=", sudo_wave.company_id.id),
+            ("warehouse_id", "=", sudo_wave.warehouse_id.id),
         ]
-        if norm_to_date:
-            quotation_domain.append(("date_order", "<=", norm_to_date))
-        if norm_from_date:
-            quotation_domain.append(("date_order", ">=", norm_from_date))
+        if sudo_wave.horizon_date_to:
+            quotation_domain.append(("date_order", "<=", sudo_wave.horizon_date_to))
+        if sudo_wave.horizon_date_from:
+            quotation_domain.append(("date_order", ">=", sudo_wave.horizon_date_from))
 
-        quotations = self.env["sale.order"].search(quotation_domain)
-        lines = self.env["sale.order.line"].search([("order_id", "in", quotations.ids)])
+        quotations = sudo_wave.env["sale.order"].search(quotation_domain)
+        lines = sudo_wave.env["sale.order.line"].search([("order_id", "in", quotations.ids)])
         bom_cache = {}
 
-        delta = relativedelta.relativedelta(norm_to_date, fields.Datetime.now())
+        delta = relativedelta.relativedelta(sudo_wave.horizon_date_to, fields.Datetime.now())
         timeframe_months = min(12, delta.years * 12 + delta.months)
 
         vals_list = []
@@ -135,21 +169,22 @@ class MlDemandWave(models.Model):
             if not calc["modified_qty"] or calc["final_qty"] <= 0:
                 continue
 
-            vals_list.append(
-                wave._prepare_line_vals(
+            sudo_wave._accumulate_prepared_line_vals(
+                desired_by_key,
+                sudo_wave._prepare_line_vals(
                     line=line,
                     target_product=line.product_id,
                     demand_type="direct",
                     raw_qty=calc["final_qty"],
                     source_calc=calc,
-                )
+                ),
             )
 
-            component_demands = wave._explode_bom_component_demand(
+            component_demands = sudo_wave._explode_bom_component_demand(
                 line.product_id, calc["final_qty"], bom_cache=bom_cache
             )
             for component_id, raw_component_qty in component_demands.items():
-                component = self.env["product.product"].browse(component_id)
+                component = sudo_wave.env["product.product"].browse(component_id)
                 component_qty = ceil(
                     float_round(
                         raw_component_qty,
@@ -158,22 +193,82 @@ class MlDemandWave(models.Model):
                 )
                 if component_qty <= 0:
                     continue
-                vals_list.append(
-                    wave._prepare_line_vals(
+                sudo_wave._accumulate_prepared_line_vals(
+                    desired_by_key,
+                    sudo_wave._prepare_line_vals(
                         line=line,
                         target_product=component,
                         demand_type="indirect",
                         raw_qty=component_qty,
                         source_calc=calc,
-                    )
+                    ),
                 )
 
-        if vals_list:
-            self.env["ml.demand.line"].create(vals_list)
+        touched_keys = set()
+        create_vals_list = []
+        updatable_fields = {
+            "source_sale_order_id",
+            "source_sale_order_line_id",
+            "source_product_id",
+            "target_product_id",
+            "demand_type",
+            "raw_qty",
+            "covered_qty",
+            "effective_qty",
+            "uom_id",
+            "ml_probability",
+            "source_original_qty",
+            "source_modified_qty",
+            "source_final_qty",
+            "source_no_delivery_batches",
+            "is_active",
+        }
 
-        wave.recompute_coverages()
-        wave.state = "active"
-        return wave
+        for demand_key, vals in desired_by_key.items():
+            touched_keys.add(demand_key)
+            existing = existing_lines.get(demand_key)
+            if existing:
+                write_vals = {k: v for k, v in vals.items() if k in updatable_fields}
+                existing.write(write_vals)
+            else:
+                create_vals_list.append(vals)
+
+        if create_vals_list:
+            sudo_wave.env["ml.demand.line"].create(create_vals_list)
+
+        stale_lines = sudo_wave.line_ids.filtered(
+            lambda line: line.demand_key not in touched_keys
+        )
+        if stale_lines:
+            stale_lines.write(
+                {
+                    "raw_qty": 0.0,
+                    "covered_qty": 0.0,
+                    "effective_qty": 0.0,
+                    "is_active": False,
+                }
+            )
+
+        # Coverage is recomputed from linked documents on each rebuild.
+        sudo_wave.coverage_ids.unlink()
+
+        sudo_wave.recompute_coverages()
+        sudo_wave.state = "active"
+        return self
+
+    def _accumulate_prepared_line_vals(self, desired_by_key, prepared_vals):
+        key = prepared_vals["demand_key"]
+        existing = desired_by_key.get(key)
+        if not existing:
+            desired_by_key[key] = prepared_vals
+            return
+        existing["raw_qty"] += prepared_vals["raw_qty"]
+        existing["effective_qty"] += prepared_vals["effective_qty"]
+        existing["source_original_qty"] += prepared_vals["source_original_qty"]
+        existing["source_modified_qty"] += prepared_vals["source_modified_qty"]
+        existing["source_final_qty"] += prepared_vals["source_final_qty"]
+        existing["ml_probability"] = prepared_vals["ml_probability"]
+        existing["source_no_delivery_batches"] = prepared_vals["source_no_delivery_batches"]
 
     @api.model
     def _compute_ml_line_qty(self, line, timeframe_months):
@@ -205,6 +300,7 @@ class MlDemandWave(models.Model):
         return {
             "wave_id": self.id,
             "demand_uid": self.demand_uid,
+            "demand_key": f"{line.id}:{target_product.id}:{demand_type}",
             "source_sale_order_id": line.order_id.id,
             "source_sale_order_line_id": line.id,
             "source_product_id": line.product_id.id,
@@ -297,24 +393,27 @@ class MlDemandWave(models.Model):
 
     def recompute_coverages(self):
         for wave in self:
-            wave.coverage_ids.unlink()
-            wave._recompute_indirect_coverages()
+            sudo_wave = wave.sudo()
+            sudo_wave.coverage_ids.unlink()
+            sudo_wave._recompute_indirect_coverages()
         return True
 
     def _recompute_indirect_coverages(self):
-        self.ensure_one()
-        line_model = self.env["ml.demand.line"]
-        move_model = self.env["stock.move"]
+        sudo_wave = self.sudo()
+        sudo_wave.ensure_one()
+        line_model = sudo_wave.env["ml.demand.line"]
+        move_model = sudo_wave.env["stock.move"]
         indirect_lines = line_model.search(
             [
-                ("wave_id", "=", self.id),
+                ("wave_id", "=", sudo_wave.id),
                 ("demand_type", "=", "indirect"),
+                ("is_active", "=", True),
             ],
             order="target_product_id, id",
         )
         if not indirect_lines:
             direct_lines = line_model.search(
-                [("wave_id", "=", self.id), ("demand_type", "=", "direct")]
+                [("wave_id", "=", sudo_wave.id), ("demand_type", "=", "direct")]
             )
             for line in direct_lines:
                 line.covered_qty = 0.0
@@ -348,9 +447,9 @@ class MlDemandWave(models.Model):
                     move_remaining[move.id] -= alloc
                     remaining -= alloc
                     allocated += alloc
-                    self.env["ml.demand.coverage"].create(
+                    sudo_wave.env["ml.demand.coverage"].create(
                         {
-                            "wave_id": self.id,
+                            "wave_id": sudo_wave.id,
                             "demand_line_id": line.id,
                             "covered_model": "stock.move",
                             "covered_res_id": move.id,
@@ -364,7 +463,7 @@ class MlDemandWave(models.Model):
                 line.is_active = line.effective_qty > 0
 
         direct_lines = line_model.search(
-            [("wave_id", "=", self.id), ("demand_type", "=", "direct")]
+            [("wave_id", "=", sudo_wave.id), ("demand_type", "=", "direct")]
         )
         for line in direct_lines:
             line.covered_qty = 0.0
@@ -429,6 +528,7 @@ class MlDemandLine(models.Model):
 
     wave_id = fields.Many2one("ml.demand.wave", required=True, ondelete="cascade", index=True)
     demand_uid = fields.Char(required=True, index=True)
+    demand_key = fields.Char(required=True, index=True, copy=False)
 
     source_sale_order_id = fields.Many2one("sale.order", index=True)
     source_sale_order_line_id = fields.Many2one("sale.order.line", index=True)
@@ -452,19 +552,22 @@ class MlDemandLine(models.Model):
 
     coverage_ids = fields.One2many("ml.demand.coverage", "demand_line_id")
 
-    _sql_constraints = [
-        ("ml_demand_line_non_negative_raw", "CHECK(raw_qty >= 0)", "raw_qty must be >= 0."),
-        (
-            "ml_demand_line_non_negative_covered",
-            "CHECK(covered_qty >= 0)",
-            "covered_qty must be >= 0.",
-        ),
-        (
-            "ml_demand_line_non_negative_effective",
-            "CHECK(effective_qty >= 0)",
-            "effective_qty must be >= 0.",
-        ),
-    ]
+    _non_negative_raw = models.Constraint(
+        "CHECK(raw_qty >= 0)",
+        "raw_qty must be >= 0.",
+    )
+    _non_negative_covered = models.Constraint(
+        "CHECK(covered_qty >= 0)",
+        "covered_qty must be >= 0.",
+    )
+    _non_negative_effective = models.Constraint(
+        "CHECK(effective_qty >= 0)",
+        "effective_qty must be >= 0.",
+    )
+    _unique_key_per_wave = models.Constraint(
+        "UNIQUE(wave_id, demand_key)",
+        "Demand key must be unique per wave.",
+    )
 
 
 class MlDemandCoverage(models.Model):
@@ -488,15 +591,11 @@ class MlDemandCoverage(models.Model):
         required=True,
     )
 
-    _sql_constraints = [
-        (
-            "ml_demand_coverage_unique_doc",
-            "unique(demand_line_id, covered_model, covered_res_id)",
-            "Coverage entry must be unique per demand line and document.",
-        ),
-        (
-            "ml_demand_coverage_non_negative",
-            "CHECK(covered_qty >= 0)",
-            "covered_qty must be >= 0.",
-        ),
-    ]
+    _unique_doc_per_line = models.Constraint(
+        "UNIQUE(demand_line_id, covered_model, covered_res_id)",
+        "Coverage entry must be unique per demand line and document.",
+    )
+    _non_negative_covered_qty = models.Constraint(
+        "CHECK(covered_qty >= 0)",
+        "covered_qty must be >= 0.",
+    )

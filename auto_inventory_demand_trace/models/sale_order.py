@@ -80,7 +80,7 @@ class SaleOrderExtension(models.Model):
         self.ensure_one()
 
         # Recursion guard
-        if self.env.context.get('skip_prediction'):
+        if self.env.context.get('skip_prediction') or self.env.context.get('_prediction_running'):
             return None
 
         # Get active (production) model
@@ -93,8 +93,21 @@ class SaleOrderExtension(models.Model):
         try:
             prefix_number = 1
 
+            def _business_message_condition(alias):
+                return f"""
+                    AND {alias}.message_type IN ('comment', 'email')
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM mail_tracking_value mtv_filter
+                        WHERE mtv_filter.mail_message_id = {alias}.id
+                    )
+                    AND COALESCE({alias}.body, '') NOT ILIKE '%%Передбачення успішності замовлення%%'
+                """
+
+            business_m = _business_message_condition("m")
+
             # SQL query analogous to order_data_collector but filtered for current order
-            query = """
+            query = f"""
                 WITH order_data AS (
                     SELECT 
                         so.id as order_id,
@@ -108,6 +121,7 @@ class SaleOrderExtension(models.Model):
                             SELECT COUNT(DISTINCT m.id)
                             FROM mail_message m 
                             WHERE m.res_id = so.id AND m.model = 'sale.order'
+                            {business_m}
                         ) as order_messages,
                         (
                             SELECT COUNT(DISTINCT CASE 
@@ -168,6 +182,7 @@ class SaleOrderExtension(models.Model):
                             LEFT JOIN mail_message m ON m.res_id = s2.id AND m.model = 'sale.order'
                             WHERE s2.partner_id = so.partner_id
                             AND s2.create_date < so.create_date
+                            {business_m}
                         ) as partner_total_messages,
                         (
                             SELECT COALESCE(AVG(message_count), 0)
@@ -178,6 +193,7 @@ class SaleOrderExtension(models.Model):
                                 WHERE s2.partner_id = so.partner_id
                                 AND s2.create_date < so.create_date
                                 AND s2.state = 'sale'
+                                {business_m}
                                 GROUP BY s2.id
                             ) as t
                         ) as partner_success_avg_messages,
@@ -190,6 +206,7 @@ class SaleOrderExtension(models.Model):
                                 WHERE s2.partner_id = so.partner_id
                                 AND s2.create_date < so.create_date
                                 AND s2.state != 'sale'
+                                {business_m}
                                 GROUP BY s2.id
                             ) as t
                         ) as partner_fail_avg_messages,
@@ -318,6 +335,12 @@ class SaleOrderExtension(models.Model):
 
                 prediction_log = self.prediction_log or ""
                 probability_percent = round(prediction_result.get('success_probability', 0) * 100, 2)
+                # Idempotency guard: if probability is unchanged, avoid noisy rewrites/chatter spam.
+                if (
+                    self.is_success_provided
+                    and round(self.success_prediction or 0.0, 2) == probability_percent
+                ):
+                    return True
                 new_log_entry = f"{now}: Передбачення успішності: {probability_percent}%\n"
                 updated_log = new_log_entry + prediction_log
 
@@ -327,13 +350,15 @@ class SaleOrderExtension(models.Model):
                 )
 
                 # Update record fields
-                self.write({
-                    'is_success_provided': True,
-                    'success_prediction': probability_percent,
-                    'last_prediction_date': fields.Datetime.now(),
-                    'prediction_log': updated_log,
-                    'features_importance': features_html
-                })
+                self.with_context(skip_prediction=True, _prediction_running=True).write(
+                    {
+                        'is_success_provided': True,
+                        'success_prediction': probability_percent,
+                        'last_prediction_date': fields.Datetime.now(),
+                        'prediction_log': updated_log,
+                        'features_importance': features_html
+                    }
+                )
 
                 # Post chatter message
                 message = f"<b>Передбачення успішності замовлення:</b><br/>"
@@ -342,7 +367,7 @@ class SaleOrderExtension(models.Model):
                 if 'top_features' in prediction_result and prediction_result['top_features']:
                     message += f"Ознаки, що мали найбільший вплив: {', '.join(prediction_result.get('top_features', []))}"
 
-                self.with_context(skip_prediction=True).message_post(
+                self.with_context(skip_prediction=True, _prediction_running=True).message_post(
                     body=message,
                     subtype_id=self.env.ref('mail.mt_note').id,
                     message_type='comment',
@@ -637,16 +662,29 @@ class SaleOrderExtension(models.Model):
 class MailMessageExtension(models.Model):
     _inherit = 'mail.message'
 
+    @staticmethod
+    def _is_business_chatter_message(message):
+        if message.model != 'sale.order' or not message.res_id:
+            return False
+        if message.tracking_value_ids:
+            return False
+        if message.message_type not in ('comment', 'email'):
+            return False
+        body = (message.body or '').lower()
+        if 'передбачення успішності замовлення' in body:
+            return False
+        return True
+
     @api.model_create_multi
     def create(self, vals_list):
         """Track new messages for sale orders to re-predict"""
         records = super(MailMessageExtension, self).create(vals_list)
 
-        if self.env.context.get('skip_prediction'):
+        if self.env.context.get('skip_prediction') or self.env.context.get('_prediction_running'):
             return records
 
-        # Collect messages related to sale.order
-        order_messages = records.filtered(lambda m: m.model == 'sale.order' and m.res_id)
+        # Only react to tracked field-change messages to avoid chatter loops.
+        order_messages = records.filtered(self._is_business_chatter_message)
 
         # Group messages by order
         order_dict = {}
@@ -660,7 +698,7 @@ class MailMessageExtension(models.Model):
             order = self.env['sale.order'].browse(order_id)
             if order.exists():
                 try:
-                    order._predict_order_success()
+                    order.with_context(_prediction_running=True)._predict_order_success()
                     print('+++ ЗМІНИ ВІДБУЛИСЯ +++')
                 except Exception as e:
                     _logger.error(f"Помилка при оновленні прогнозу після додавання повідомлення: {str(e)}")
