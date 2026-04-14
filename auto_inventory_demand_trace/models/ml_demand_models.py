@@ -76,16 +76,27 @@ class MlDemandWave(models.Model):
             ("state", "=", "active"),
             ("warehouse_id", "=", warehouse.id),
             ("company_id", "=", self.env.company.id),
-            ("horizon_date_to", "=", norm_to_date),
         ]
-        if norm_from_date:
-            domain.append(("horizon_date_from", "=", norm_from_date))
-        else:
-            domain.append(("horizon_date_from", "=", False))
-
-        wave = sudo_self.search(domain, limit=1)
+        active_waves = sudo_self.search(domain, order="id desc")
+        wave = active_waves[:1]
         if wave:
-            # Keep active wave synchronized with current quotation snapshot.
+            # Enforce single active wave per warehouse/company.
+            if len(active_waves) > 1:
+                (active_waves - wave).write({"state": "closed"})
+
+            # Keep the same UID, but sync horizon requested by caller.
+            needs_horizon_update = (
+                wave.horizon_date_to != norm_to_date
+                or (wave.horizon_date_from or False) != (norm_from_date or False)
+            )
+            if needs_horizon_update:
+                wave.write(
+                    {
+                        "horizon_date_from": norm_from_date or False,
+                        "horizon_date_to": norm_to_date,
+                    }
+                )
+
             wave.rebuild_from_quotations()
             return self.browse(wave.id)
         wave = sudo_self.build_wave_from_quotations(
@@ -108,6 +119,15 @@ class MlDemandWave(models.Model):
 
         norm_to_date = self._normalize_to_date(to_date)
         norm_from_date = self._normalize_from_date(from_date)
+
+        # Hard guard: only one active wave per warehouse/company.
+        active_domain = [
+            ("state", "=", "active"),
+            ("warehouse_id", "=", warehouse.id),
+            ("company_id", "=", sudo_self.env.company.id),
+        ]
+        sudo_self.search(active_domain).write({"state": "closed"})
+
         uid = str(uuid4())
         wave = sudo_self.create(
             {
