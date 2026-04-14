@@ -1,3 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_inventory_prediction_model_user,inventory.prediction.model.user,model_inventory_prediction_model,base.group_user,1,0,0,0
 access_inventory_prediction_model_manager,inventory.prediction.model.manager,model_inventory_prediction_model,stock.group_stock_manager,1,1,1,1
+access_ml_demand_wave_user,access.ml.demand.wave.user,model_ml_demand_wave,base.group_user,1,1,1,0
+access_ml_demand_line_user,access.ml.demand.line.user,model_ml_demand_line,base.group_user,1,1,1,0
+access_ml_demand_coverage_user,access.ml.demand.coverage.user,model_ml_demand_coverage,base.group_user,1,1,1,0

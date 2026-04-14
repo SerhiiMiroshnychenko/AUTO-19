@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_ml_demand_wave_tree" model="ir.ui.view">
+        <field name="name">ml.demand.wave.tree</field>
+        <field name="model">ml.demand.wave</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+                <field name="demand_uid"/>
+                <field name="warehouse_id"/>
+                <field name="company_id"/>
+                <field name="horizon_date_to"/>
+                <field name="state"/>
+                <field name="create_date"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_ml_demand_wave_form" model="ir.ui.view">
+        <field name="name">ml.demand.wave.form</field>
+        <field name="model">ml.demand.wave</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="demand_uid" readonly="1"/>
+                            <field name="state"/>
+                        </group>
+                        <group>
+                            <field name="warehouse_id"/>
+                            <field name="company_id"/>
+                            <field name="horizon_date_from"/>
+                            <field name="horizon_date_to"/>
+                        </group>
+                    </group>
+                    <field name="note"/>
+                    <notebook>
+                        <page string="Demand Lines">
+                            <field name="line_ids" nolabel="1">
+                                <tree>
+                                    <field name="source_sale_order_id"/>
+                                    <field name="source_product_id"/>
+                                    <field name="target_product_id"/>
+                                    <field name="demand_type"/>
+                                    <field name="raw_qty"/>
+                                    <field name="covered_qty"/>
+                                    <field name="effective_qty"/>
+                                    <field name="is_active"/>
+                                </tree>
+                            </field>
+                        </page>
+                        <page string="Coverage">
+                            <field name="coverage_ids" nolabel="1">
+                                <tree>
+                                    <field name="demand_line_id"/>
+                                    <field name="covered_model"/>
+                                    <field name="covered_res_id"/>
+                                    <field name="covered_qty"/>
+                                    <field name="coverage_state"/>
+                                </tree>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_ml_demand_wave" model="ir.actions.act_window">
+        <field name="name">ML Demand Waves</field>
+        <field name="res_model">ml.demand.wave</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem id="menu_ml_demand_root"
+              name="ML Demand Trace"
+              parent="stock.menu_stock_root"
+              sequence="95"/>
+
+    <menuitem id="menu_ml_demand_wave"
+              name="Demand Waves"
+              parent="menu_ml_demand_root"
+              action="action_ml_demand_wave"
+              sequence="10"/>
+</odoo>

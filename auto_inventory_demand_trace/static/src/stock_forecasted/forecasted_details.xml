@@ -32,6 +32,12 @@
                             / <t t-out="sale_order.no_delivery_batches"/> Batches 
                             = <t t-out="_formatFloat(-sale_order.final_value)"/> 
                         </t>
+                        <t t-if="sale_order.direct_value or sale_order.indirect_value">
+                            |
+                            Direct: <t t-out="_formatFloat(-(sale_order.direct_value or 0.0))"/>
+                            +
+                            Indirect(BOM): <t t-out="_formatFloat(-(sale_order.indirect_value or 0.0))"/>
+                        </t>
                     </td>
                 </tr>
             </t>

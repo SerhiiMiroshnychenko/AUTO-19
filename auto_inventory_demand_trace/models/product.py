@@ -22,6 +22,12 @@ class Product(models.Model):
     unconfirmed_outgoing_qty = fields.Float(
         "Unconfirmed Outgoing", compute="_compute_quantities", compute_sudo=False
     )
+    unconfirmed_outgoing_direct_qty = fields.Float(
+        "Unconfirmed Outgoing (Direct)", compute="_compute_quantities", compute_sudo=False
+    )
+    unconfirmed_outgoing_indirect_qty = fields.Float(
+        "Unconfirmed Outgoing (Indirect)", compute="_compute_quantities", compute_sudo=False
+    )
 
     virtual_available_ml = fields.Float(
         "Virtual Available ML", compute="_compute_quantities", compute_sudo=False
@@ -79,6 +85,8 @@ class Product(models.Model):
         services.virtual_available = 0.0
         services.free_qty = 0.0
         services.unconfirmed_outgoing_qty = 0.0
+        services.unconfirmed_outgoing_direct_qty = 0.0
+        services.unconfirmed_outgoing_indirect_qty = 0.0
         services.virtual_available_ml = 0.0
         services.incoming_onhand_qty = 0.0
         services.incoming_inbound_qty = 0.0
@@ -126,6 +134,8 @@ class Product(models.Model):
             unconfirmed = unconfirmed_results.get(product.id, {})
             unconfirmed_qty = unconfirmed.get("qty", 0)
             p_res["unconfirmed_outgoing_qty"] = unconfirmed_qty
+            p_res["unconfirmed_outgoing_direct_qty"] = unconfirmed.get("direct_qty", 0)
+            p_res["unconfirmed_outgoing_indirect_qty"] = unconfirmed.get("indirect_qty", 0)
             
             incoming = incoming_breakdown_results.get(product.id, {})
             p_res["incoming_onhand_qty"] = incoming.get("incoming_onhand_qty", 0)
@@ -219,6 +229,8 @@ class Product(models.Model):
                 "outgoing_qty": base["outgoing_qty"],
                 "virtual_available": standard_forecast,
                 "unconfirmed_outgoing_qty": unconfirmed.get("qty", 0.0),
+                "unconfirmed_outgoing_direct_qty": unconfirmed.get("direct_qty", 0.0),
+                "unconfirmed_outgoing_indirect_qty": unconfirmed.get("indirect_qty", 0.0),
                 "virtual_available_ml": ml_forecast,
                 "incoming_onhand_qty": incoming.get("incoming_onhand_qty", 0.0),
                 "incoming_inbound_qty": incoming.get("incoming_inbound_qty", 0.0),
@@ -248,7 +260,6 @@ class Product(models.Model):
         # Search for unconfirmed orders with success predictions
         quotation_domain = [
             ("state", "not in", ["sale", "cancel"]),
-            ("order_line.product_id", "in", sudo_self.ids),
             ("is_success_provided", "=", True),
         ]
         if to_date:
@@ -259,10 +270,12 @@ class Product(models.Model):
             quotation_domain.append(("warehouse_id", "=", warehouse_id))
 
         quotations = sudo_self.env["sale.order"].search(quotation_domain)
+        target_products = {product.id: product for product in sudo_self}
         results = {}
         lines = sudo_self.env["sale.order.line"].search(
             [("order_id", "in", quotations.ids)]
         )
+        bom_cache = {}
 
         # Get number of months until to_date
         delta = relativedelta.relativedelta(to_date, fields.Datetime.today())
@@ -271,49 +284,255 @@ class Product(models.Model):
             timeframe_months = 12
 
         for line in lines:
-            if line.product_id.id in sudo_self.ids:
-                result = results.setdefault(
-                    line.product_id.id, {"orders": {}, "qty": 0}
-                )
-                rounding = line.product_id.uom_id.rounding
-                line_qty = line.product_uom_qty
+            if not line.product_id or line.product_id.type == "service":
+                continue
 
-                # Use ML prediction instead of primitive CRM rules
-                success_probability = line.order_id.success_prediction / 100.0
+            line_product = line.product_id
+            line_rounding = line_product.uom_id.rounding
+            line_qty = line.product_uom_qty
 
-                modified_qty = ceil(
+            # Use ML prediction instead of primitive CRM rules
+            success_probability = line.order_id.success_prediction / 100.0
+            modified_qty = ceil(
+                float_round(line_qty * success_probability, precision_rounding=line_rounding)
+            )
+            final_qty = ceil(float_round(modified_qty, precision_rounding=line_rounding))
+            no_delivery_batches = getattr(line.order_id, "no_delivery_batches", 1) or 1
+
+            if not modified_qty:
+                continue
+
+            if no_delivery_batches > 1:
+                final_qty = ceil(
                     float_round(
-                        line_qty * success_probability, precision_rounding=rounding
+                        timeframe_months * (modified_qty / no_delivery_batches),
+                        precision_rounding=line_rounding,
                     )
                 )
-                final_qty = ceil(float_round(modified_qty, precision_rounding=rounding))
-                no_delivery_batches = getattr(line.order_id, 'no_delivery_batches', 1) or 1
 
-                if modified_qty:
-                    if no_delivery_batches > 1:
-                        final_qty = ceil(
-                            float_round(
-                                timeframe_months * (modified_qty / no_delivery_batches),
-                                precision_rounding=rounding,
-                            )
-                        )
-                    result["qty"] += final_qty
-                    if line.order_id not in result["orders"]:
-                        result["orders"][line.order_id] = {
-                            "id": line.order_id.id,
-                            "name": line.order_id.name,
-                            "final_value": final_qty,
-                            "no_delivery_batches": no_delivery_batches,
-                            "modified_value": modified_qty,
-                            "original_value": line_qty,
-                            "ml_probability": success_probability,
-                        }
-                    else:
-                        result["orders"][line.order_id]["final_value"] += final_qty
-                        result["orders"][line.order_id]["modified_value"] += modified_qty
-                        result["orders"][line.order_id]["original_value"] += line_qty
+            if line_product.id in target_products:
+                result = results.setdefault(
+                    line_product.id,
+                    {"orders": {}, "qty": 0.0, "direct_qty": 0.0, "indirect_qty": 0.0},
+                )
+                result["qty"] += final_qty
+                result["direct_qty"] += final_qty
+                if line.order_id not in result["orders"]:
+                    result["orders"][line.order_id] = {
+                        "id": line.order_id.id,
+                        "name": line.order_id.name,
+                        "final_value": final_qty,
+                        "direct_value": final_qty,
+                        "indirect_value": 0.0,
+                        "no_delivery_batches": no_delivery_batches,
+                        "modified_value": modified_qty,
+                        "original_value": line_qty,
+                        "ml_probability": success_probability,
+                    }
+                else:
+                    result["orders"][line.order_id]["final_value"] += final_qty
+                    result["orders"][line.order_id]["direct_value"] += final_qty
+                    result["orders"][line.order_id]["modified_value"] += modified_qty
+                    result["orders"][line.order_id]["original_value"] += line_qty
 
+            component_demands = sudo_self._explode_bom_component_demand(
+                line_product, final_qty, bom_cache=bom_cache
+            )
+            for component_id, raw_component_qty in component_demands.items():
+                if component_id not in target_products:
+                    continue
+                component = target_products[component_id]
+                component_qty = ceil(
+                    float_round(
+                        raw_component_qty,
+                        precision_rounding=component.uom_id.rounding,
+                    )
+                )
+                if component_qty <= 0:
+                    continue
+
+                result = results.setdefault(
+                    component_id,
+                    {"orders": {}, "qty": 0.0, "direct_qty": 0.0, "indirect_qty": 0.0},
+                )
+                result["qty"] += component_qty
+                result["indirect_qty"] += component_qty
+                if line.order_id not in result["orders"]:
+                    result["orders"][line.order_id] = {
+                        "id": line.order_id.id,
+                        "name": line.order_id.name,
+                        "final_value": component_qty,
+                        "direct_value": 0.0,
+                        "indirect_value": component_qty,
+                        "no_delivery_batches": no_delivery_batches,
+                        "modified_value": modified_qty,
+                        "original_value": line_qty,
+                        "ml_probability": success_probability,
+                    }
+                else:
+                    result["orders"][line.order_id]["final_value"] += component_qty
+                    result["orders"][line.order_id]["indirect_value"] += component_qty
+
+        pending_mo_raw_by_product = sudo_self._get_pending_mo_raw_consumption_qty(
+            target_products.keys(), from_date=from_date, to_date=to_date
+        )
+        sudo_self._apply_indirect_demand_dedup(results, pending_mo_raw_by_product)
         return results
+
+    def _get_pending_mo_raw_consumption_qty(self, product_ids, from_date=False, to_date=False):
+        sudo_self = self.sudo()
+        product_ids = [pid for pid in product_ids if pid]
+        if not product_ids:
+            return {}
+
+        _, __, domain_move_out_loc = sudo_self._get_domain_locations()
+        domain = [
+            ("product_id", "in", product_ids),
+            ("raw_material_production_id", "!=", False),
+            ("state", "in", ("waiting", "confirmed", "assigned", "partially_available")),
+        ] + domain_move_out_loc
+
+        if from_date:
+            domain.append(("date", ">=", from_date))
+        if to_date:
+            domain.append(("date", "<=", to_date))
+
+        moves = sudo_self.env["stock.move"].with_context(active_test=False).search(domain)
+        consumption = defaultdict(float)
+        for move in moves:
+            consumption[move.product_id.id] += move.product_qty
+        return dict(consumption)
+
+    def _apply_indirect_demand_dedup(self, results, pending_mo_raw_by_product):
+        for product_id, values in results.items():
+            indirect_qty = values.get("indirect_qty", 0.0)
+            if indirect_qty <= 0:
+                continue
+
+            covered_qty = min(indirect_qty, pending_mo_raw_by_product.get(product_id, 0.0))
+            if covered_qty <= 0:
+                continue
+
+            values["indirect_qty"] = max(0.0, indirect_qty - covered_qty)
+            values["qty"] = values.get("direct_qty", 0.0) + values["indirect_qty"]
+
+            order_values = list(values.get("orders", {}).values())
+            total_order_indirect = sum(
+                max(0.0, order_data.get("indirect_value", 0.0))
+                for order_data in order_values
+            )
+            if total_order_indirect <= 0:
+                continue
+
+            remaining_to_reduce = covered_qty
+            for order_data in order_values:
+                current_indirect = max(0.0, order_data.get("indirect_value", 0.0))
+                if current_indirect <= 0:
+                    continue
+
+                proportional_reduce = covered_qty * (current_indirect / total_order_indirect)
+                reduce_qty = min(current_indirect, proportional_reduce)
+                new_indirect = current_indirect - reduce_qty
+                order_data["indirect_value"] = new_indirect
+                order_data["final_value"] = max(
+                    0.0, order_data.get("direct_value", 0.0) + new_indirect
+                )
+                remaining_to_reduce -= reduce_qty
+
+            if remaining_to_reduce > 1e-6:
+                sorted_orders = sorted(
+                    order_values,
+                    key=lambda row: row.get("indirect_value", 0.0),
+                    reverse=True,
+                )
+                for order_data in sorted_orders:
+                    if remaining_to_reduce <= 1e-6:
+                        break
+                    current_indirect = max(0.0, order_data.get("indirect_value", 0.0))
+                    if current_indirect <= 0:
+                        continue
+                    reduce_qty = min(current_indirect, remaining_to_reduce)
+                    new_indirect = current_indirect - reduce_qty
+                    order_data["indirect_value"] = new_indirect
+                    order_data["final_value"] = max(
+                        0.0, order_data.get("direct_value", 0.0) + new_indirect
+                    )
+                    remaining_to_reduce -= reduce_qty
+
+    def _get_product_bom_for_ml(self, product, bom_cache=None):
+        bom_cache = bom_cache or {}
+        if product.id in bom_cache:
+            return bom_cache[product.id]
+
+        bom_model = self.env["mrp.bom"]
+        bom = False
+        normal_bom = bom_model._bom_find(product, bom_type="normal")
+        if isinstance(normal_bom, dict):
+            bom = normal_bom.get(product) or normal_bom.get(product.id)
+        else:
+            bom = normal_bom
+
+        if not bom:
+            phantom_bom = bom_model._bom_find(product, bom_type="phantom")
+            if isinstance(phantom_bom, dict):
+                bom = phantom_bom.get(product) or phantom_bom.get(product.id)
+            else:
+                bom = phantom_bom
+
+        bom_cache[product.id] = bom or False
+        return bom_cache[product.id]
+
+    def _explode_bom_component_demand(
+            self, product, qty, bom_cache=None, traversal_path=None
+    ):
+        if not product or qty <= 0:
+            return {}
+        traversal_path = traversal_path or set()
+        if product.id in traversal_path:
+            return {}
+
+        bom = self._get_product_bom_for_ml(product, bom_cache=bom_cache)
+        if not bom or not bom.bom_line_ids or not bom.product_qty:
+            return {}
+
+        qty_in_bom_uom = product.uom_id._compute_quantity(
+            qty, bom.product_uom_id, raise_if_failure=False
+        )
+        if qty_in_bom_uom <= 0:
+            return {}
+
+        factor = qty_in_bom_uom / bom.product_qty
+        aggregated_demands = defaultdict(float)
+
+        for bom_line in bom.bom_line_ids:
+            component = bom_line.product_id
+            if not component or component.type == "service":
+                continue
+
+            component_qty_in_line_uom = bom_line.product_qty * factor
+            component_qty = bom_line.product_uom_id._compute_quantity(
+                component_qty_in_line_uom,
+                component.uom_id,
+                raise_if_failure=False,
+            )
+            if component_qty <= 0:
+                continue
+
+            next_path = set(traversal_path)
+            next_path.add(product.id)
+            nested_demands = self._explode_bom_component_demand(
+                component,
+                component_qty,
+                bom_cache=bom_cache,
+                traversal_path=next_path,
+            )
+            if nested_demands:
+                for nested_component_id, nested_qty in nested_demands.items():
+                    aggregated_demands[nested_component_id] += nested_qty
+            else:
+                aggregated_demands[component.id] += component_qty
+
+        return dict(aggregated_demands)
 
     def _breakdown_incoming_quantities(
             self, incoming_qties, component_quantities, owner_id, to_date, from_date
@@ -399,7 +618,12 @@ class Product(models.Model):
                 reserved_by_component = defaultdict(float)
                 for mo in product_mos.filtered(lambda m: m.bom_id == bom):
                     for move in mo.move_raw_ids.filtered(lambda m: m.state not in ('done', 'cancel')):
-                        reserved_by_component[move.product_id.id] += move.forecast_availability
+                        # forecast_availability may be negative when components are missing,
+                        # but feasibility capacity must not use negative reservation.
+                        reserved_qty = getattr(move, "reserved_availability", 0.0) or 0.0
+                        if not reserved_qty:
+                            reserved_qty = getattr(move, "quantity", 0.0) or 0.0
+                        reserved_by_component[move.product_id.id] += max(0.0, reserved_qty)
 
                 onhand = min(
                     float_round(
@@ -408,7 +632,7 @@ class Product(models.Model):
                     )
                     for l in valid_bom_lines
                 )
-                onhand = min(qty, onhand)
+                onhand = max(0.0, min(qty, onhand))
 
                 inbound = min(
                     float_round(
@@ -417,8 +641,8 @@ class Product(models.Model):
                     )
                     for l in valid_bom_lines
                 )
-                inbound = min(qty - onhand, inbound)
-                missing = qty - onhand - inbound
+                inbound = max(0.0, min(qty - onhand, inbound))
+                missing = max(0.0, qty - onhand - inbound)
 
                 result["incoming_onhand_qty"] += onhand
                 result["incoming_inbound_qty"] += inbound
@@ -454,6 +678,12 @@ class ProductTemplate(models.Model):
 
     unconfirmed_outgoing_qty = fields.Float(
         "Unconfirmed Outgoing", compute="_compute_quantities", compute_sudo=False
+    )
+    unconfirmed_outgoing_direct_qty = fields.Float(
+        "Unconfirmed Outgoing (Direct)", compute="_compute_quantities", compute_sudo=False
+    )
+    unconfirmed_outgoing_indirect_qty = fields.Float(
+        "Unconfirmed Outgoing (Indirect)", compute="_compute_quantities", compute_sudo=False
     )
 
     virtual_available_ml = fields.Float(
@@ -497,6 +727,8 @@ class ProductTemplate(models.Model):
         for template in self:
             t_res = res[template.id]
             template.unconfirmed_outgoing_qty = t_res["unconfirmed_outgoing_qty"]
+            template.unconfirmed_outgoing_direct_qty = t_res["unconfirmed_outgoing_direct_qty"]
+            template.unconfirmed_outgoing_indirect_qty = t_res["unconfirmed_outgoing_indirect_qty"]
             template.virtual_available_ml = t_res["virtual_available_ml"]
             template.incoming_onhand_qty = t_res["incoming_onhand_qty"]
             template.incoming_inbound_qty = t_res["incoming_inbound_qty"]
@@ -511,6 +743,8 @@ class ProductTemplate(models.Model):
             for p in self.product_variant_ids._origin.read(
                 [
                     "unconfirmed_outgoing_qty",
+                    "unconfirmed_outgoing_direct_qty",
+                    "unconfirmed_outgoing_indirect_qty",
                     "virtual_available_ml",
                     "incoming_onhand_qty",
                     "incoming_inbound_qty",
@@ -522,6 +756,8 @@ class ProductTemplate(models.Model):
         }
         for template in self:
             unconfirmed_outgoing_qty = 0
+            unconfirmed_outgoing_direct_qty = 0
+            unconfirmed_outgoing_indirect_qty = 0
             virtual_available_ml = 0
             incoming_onhand_qty = 0
             incoming_inbound_qty = 0
@@ -530,6 +766,8 @@ class ProductTemplate(models.Model):
             virtual_available_real = 0
             for p in template.product_variant_ids._origin:
                 unconfirmed_outgoing_qty += variants_available[p.id]["unconfirmed_outgoing_qty"]
+                unconfirmed_outgoing_direct_qty += variants_available[p.id]["unconfirmed_outgoing_direct_qty"]
+                unconfirmed_outgoing_indirect_qty += variants_available[p.id]["unconfirmed_outgoing_indirect_qty"]
                 virtual_available_ml += variants_available[p.id]["virtual_available_ml"]
                 incoming_onhand_qty += variants_available[p.id]["incoming_onhand_qty"]
                 incoming_inbound_qty += variants_available[p.id]["incoming_inbound_qty"]
@@ -538,6 +776,8 @@ class ProductTemplate(models.Model):
                 virtual_available_real += variants_available[p.id]["virtual_available_real"]
             t_res = res[template.id]
             t_res["unconfirmed_outgoing_qty"] = unconfirmed_outgoing_qty
+            t_res["unconfirmed_outgoing_direct_qty"] = unconfirmed_outgoing_direct_qty
+            t_res["unconfirmed_outgoing_indirect_qty"] = unconfirmed_outgoing_indirect_qty
             t_res["virtual_available_ml"] = virtual_available_ml
             t_res["incoming_onhand_qty"] = incoming_onhand_qty
             t_res["incoming_inbound_qty"] = incoming_inbound_qty

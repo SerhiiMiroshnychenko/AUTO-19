@@ -218,6 +218,28 @@
                             <div>ML Forecast Gap</div>
                         </div>
                     </div>
+                    <div class="row text-center justify-content-center align-items-center g-2 mt-2">
+                        <div class="col-md-auto text-center">
+                            <div class="h5 text-warning">
+                                <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_direct_qty)"/>
+                            </div>
+                            <div>Direct ML Outgoing</div>
+                        </div>
+                        <div class="h5 col-md-auto text-center">+</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h5 text-danger">
+                                <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_indirect_qty)"/>
+                            </div>
+                            <div>Indirect ML Outgoing (BOM)</div>
+                        </div>
+                        <div class="h5 col-md-auto text-center">=</div>
+                        <div class="col-md-auto text-center">
+                            <div class="h5 text-warning-emphasis">
+                                <t t-out="_formatFloat(this.props.docs.unconfirmed_outgoing_qty)"/>
+                            </div>
+                            <div>Total ML Outgoing</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-12">
                     <div class="text-uppercase fw-bold small text-muted mb-2">Odoo Replenishment View</div>

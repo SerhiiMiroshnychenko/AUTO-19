@@ -45,6 +45,8 @@ class StockForecasted(models.AbstractModel):
             "outgoing_qty": 0.0,
             "virtual_available": 0.0,
             "unconfirmed_outgoing_qty": 0.0,
+            "unconfirmed_outgoing_direct_qty": 0.0,
+            "unconfirmed_outgoing_indirect_qty": 0.0,
             "virtual_available_ml": 0.0,
             "incoming_onhand_qty": 0.0,
             "incoming_inbound_qty": 0.0,
@@ -177,6 +179,18 @@ class StockForecasted(models.AbstractModel):
                 "source": "Custom module: _get_products_qty_in_unconfirmed_quotations()",
                 "meaning": "Прогнозований ML-обсяг відвантажень із непідтверджених комерційних пропозицій.",
                 "value": data.get("unconfirmed_outgoing_qty", 0.0),
+            },
+            {
+                "term": "Outgoing (Unconfirmed, ML Direct)",
+                "source": "Custom module: direct match by sale.order.line.product_id",
+                "meaning": "Прямий ML-попит: товар явно присутній у рядках непідтверджених комерційних пропозицій.",
+                "value": data.get("unconfirmed_outgoing_direct_qty", 0.0),
+            },
+            {
+                "term": "Outgoing (Unconfirmed, ML Indirect BOM)",
+                "source": "Custom module: BOM explosion of quoted finished products",
+                "meaning": "Похідний ML-попит на компоненти, отриманий із BoM-розкладу прогнозованого попиту на готові вироби.",
+                "value": data.get("unconfirmed_outgoing_indirect_qty", 0.0),
             },
             {
                 "term": "Reliable ML Forecast",
