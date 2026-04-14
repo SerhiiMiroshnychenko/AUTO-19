@@ -8,9 +8,20 @@
             <field name="priority" eval="15" />
             <field name="arch" type="xml">
                 <data>
-                    <xpath expr="//field[@name='virtual_available']" position="after">
-                        <field name="virtual_available_ml" nolabel="1" class="oe_inline" />
-                        <field name="incoming_missing_qty" nolabel="1" class="oe_inline" />
+                    <xpath expr="//span[@invisible='virtual_available != 0']" position="replace">
+                        <span class="o_stat_value" invisible="virtual_available_real != 0">
+                            <field name="virtual_available_real" nolabel="1"/>
+                        </span>
+                    </xpath>
+                    <xpath expr="//span[@invisible='virtual_available &lt;= 0']" position="replace">
+                        <span class="o_stat_value text-info" invisible="virtual_available_real &lt;= 0">
+                            <field name="virtual_available_real" nolabel="1"/>
+                        </span>
+                    </xpath>
+                    <xpath expr="//span[@invisible='virtual_available &gt;= 0']" position="replace">
+                        <span class="o_stat_value text-danger" invisible="virtual_available_real &gt;= 0">
+                            <field name="virtual_available_real" nolabel="1"/>
+                        </span>
                     </xpath>
 
                     <!-- Add legacy name mapping after barcode -->
@@ -28,9 +39,20 @@
             <field name="priority" eval="15" />
             <field name="arch" type="xml">
                 <data>
-                    <xpath expr="//field[@name='virtual_available']" position="after">
-                        <field name="virtual_available_ml" nolabel="1" class="oe_inline" />
-                        <field name="incoming_missing_qty" nolabel="1" class="oe_inline" />
+                    <xpath expr="//span[@invisible='virtual_available != 0']" position="replace">
+                        <span class="o_stat_value" invisible="virtual_available_real != 0">
+                            <field name="virtual_available_real" nolabel="1"/>
+                        </span>
+                    </xpath>
+                    <xpath expr="//span[@invisible='virtual_available &lt;= 0']" position="replace">
+                        <span class="o_stat_value text-info" invisible="virtual_available_real &lt;= 0">
+                            <field name="virtual_available_real" nolabel="1"/>
+                        </span>
+                    </xpath>
+                    <xpath expr="//span[@invisible='virtual_available &gt;= 0']" position="replace">
+                        <span class="o_stat_value text-danger" invisible="virtual_available_real &gt;= 0">
+                            <field name="virtual_available_real" nolabel="1"/>
+                        </span>
                     </xpath>
 
                     <!-- Add legacy name mapping after barcode -->
