@@ -1,4 +1,5 @@
 from math import ceil
+from collections import defaultdict
 from dateutil import relativedelta
 from datetime import datetime, time
 
@@ -393,9 +394,16 @@ class Product(models.Model):
                     result["incoming_missing_qty"] += qty
                     continue
 
+                # To avoid double counting for confirmed MOs (where components are already reserved),
+                # we need to know how much of each component is reserved for THESE specific MOs.
+                reserved_by_component = defaultdict(float)
+                for mo in product_mos.filtered(lambda m: m.bom_id == bom):
+                    for move in mo.move_raw_ids.filtered(lambda m: m.state not in ('done', 'cancel')):
+                        reserved_by_component[move.product_id.id] += move.forecast_availability
+
                 onhand = min(
                     float_round(
-                        component_quantities.get(l.product_id.id, {}).get("free_qty", 0.0) / l.product_qty,
+                        (component_quantities.get(l.product_id.id, {}).get("free_qty", 0.0) + reserved_by_component.get(l.product_id.id, 0.0)) / l.product_qty,
                         precision_rounding=product.uom_id.rounding,
                     )
                     for l in valid_bom_lines
