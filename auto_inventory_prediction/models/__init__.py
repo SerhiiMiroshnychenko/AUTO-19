@@ -5,3 +5,4 @@ from . import product
 from . import stock_orderpoint
 from . import mrp_production
 from . import purchase_order
+from . import stock_move

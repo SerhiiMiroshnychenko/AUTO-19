@@ -123,19 +123,31 @@ class Product(models.Model):
         for product in self:
             p_res = res[product.id]
             unconfirmed = unconfirmed_results.get(product.id, {})
-            p_res["unconfirmed_outgoing_qty"] = unconfirmed.get("qty", 0)
-            p_res["virtual_available_ml"] = (
-                    p_res["virtual_available"] - p_res["unconfirmed_outgoing_qty"]
-            )
-
+            unconfirmed_qty = unconfirmed.get("qty", 0)
+            p_res["unconfirmed_outgoing_qty"] = unconfirmed_qty
+            
             incoming = incoming_breakdown_results.get(product.id, {})
             p_res["incoming_onhand_qty"] = incoming.get("incoming_onhand_qty", 0)
             p_res["incoming_inbound_qty"] = incoming.get("incoming_inbound_qty", 0)
             p_res["incoming_missing_qty"] = incoming.get("incoming_missing_qty", 0)
+            
+            # Smart Inventory Enhancement for virtual_available_real:
+            # 1. Start with standard Odoo forecast
+            # 2. Subtract ML-predicted outgoing from unconfirmed orders
+            # 3. Adjust for unreliable incoming (MOs without components)
+            
+            standard_virtual_available = p_res["virtual_available"]
+            standard_incoming_qty = p_res["incoming_qty"]
+            reliable_incoming_qty = incoming.get("incoming_reliable_qty", standard_incoming_qty)
+            
+            # Formula: (Standard Forecast - (Total Incoming - Reliable Incoming)) - ML Outgoing
+            real_forecast = standard_virtual_available - (standard_incoming_qty - reliable_incoming_qty) - unconfirmed_qty
+            
+            p_res["virtual_available_ml"] = standard_virtual_available - unconfirmed_qty
+            p_res["virtual_available_real"] = real_forecast
             p_res["virtual_onhand_qty"] = (
                     p_res["qty_available"] + p_res["incoming_onhand_qty"]
             )
-            p_res["virtual_available_real"] = p_res["virtual_available_ml"]
 
         return res
 

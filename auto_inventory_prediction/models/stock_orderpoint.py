@@ -1,11 +1,71 @@
-from odoo import models, api
+from odoo import models, fields, api
 from odoo.fields import Domain
+from odoo.tools import frozendict, float_compare
 from collections import defaultdict
 from datetime import datetime, time
 
 
 class StockWarehouseOrderpoint(models.Model):
     _inherit = "stock.warehouse.orderpoint"
+
+    qty_to_order_computed = fields.Float(
+        'To Order Computed', 
+        store=False, 
+        compute='_compute_qty_to_order_computed', 
+        digits='Product Unit'
+    )
+
+    @api.depends('product_id', 'location_id', 'product_id.stock_move_ids', 'product_id.stock_move_ids.state',
+                 'product_id.stock_move_ids.date', 'product_id.stock_move_ids.product_uom_qty', 'product_id.seller_ids.delay')
+    def _compute_qty(self):
+        """Override to use our enhanced ML/Feasibility forecast for reordering logic."""
+        orderpoints_contexts = defaultdict(lambda: self.env['stock.warehouse.orderpoint'])
+        for orderpoint in self:
+            if not orderpoint.product_id or not orderpoint.location_id:
+                orderpoint.qty_on_hand = False
+                orderpoint.qty_forecast = False
+                continue
+            orderpoint_context = orderpoint._get_product_context()
+            product_context = frozendict({**orderpoint_context})
+            orderpoints_contexts[product_context] |= orderpoint
+            
+        for orderpoint_context, orderpoints_by_context in orderpoints_contexts.items():
+            # We read 'virtual_available_real' instead of 'virtual_available'
+            products_qty = {
+                p['id']: p for p in orderpoints_by_context.product_id.with_context(orderpoint_context).read(
+                    ['qty_available', 'virtual_available_real']
+                )
+            }
+            products_qty_in_progress = orderpoints_by_context._quantity_in_progress()
+            for orderpoint in orderpoints_by_context:
+                orderpoint.qty_on_hand = products_qty[orderpoint.product_id.id]['qty_available']
+                # Use virtual_available_real for smart forecasting
+                orderpoint.qty_forecast = products_qty[orderpoint.product_id.id]['virtual_available_real'] + products_qty_in_progress[orderpoint.id]
+
+    def _get_qty_to_order(self, qty_in_progress_by_orderpoint=None):
+        """Override to ensure the 'To Order' quantity is calculated based on virtual_available_real."""
+        self.ensure_one()
+        if not self.product_id or not self.location_id:
+            return 0.0
+            
+        qty_to_order = 0.0
+        qty_in_progress_by_orderpoint = qty_in_progress_by_orderpoint or {}
+        qty_in_progress = qty_in_progress_by_orderpoint.get(self.id)
+        if qty_in_progress is None:
+            qty_in_progress = self._quantity_in_progress()[self.id]
+            
+        rounding = self.product_uom.rounding
+        # Use our enhanced qty_forecast (which already uses virtual_available_real)
+        if float_compare(self.qty_forecast, self.product_min_qty, precision_rounding=rounding) < 0:
+            product_context = self._get_product_context()
+            # CRITICAL: Read virtual_available_real instead of standard virtual_available
+            res = self.product_id.with_context(product_context).read(['virtual_available_real'])
+            qty_forecast_with_visibility = res[0]['virtual_available_real'] + qty_in_progress
+            
+            qty_to_order = max(self.product_min_qty, self.product_max_qty) - qty_forecast_with_visibility
+            qty_to_order = self._get_multiple_rounded_qty(qty_to_order)
+            
+        return qty_to_order
 
     def _get_replenishment_breakdown(self):
         breakdown = {
