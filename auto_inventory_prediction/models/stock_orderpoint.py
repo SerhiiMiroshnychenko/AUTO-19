@@ -10,42 +10,113 @@ class StockWarehouseOrderpoint(models.Model):
 
     qty_to_order_computed = fields.Float(
         'To Order Computed', 
-        store=False, 
+        store=True, 
         compute='_compute_qty_to_order_computed', 
         digits='Product Unit'
     )
+
+    def _quantity_in_progress(self):
+        print(
+            f"[AIP DEBUG][_quantity_in_progress] start orderpoint_ids={self.ids} count={len(self)} "
+            f"context_keys={sorted(self.env.context.keys())}"
+        )
+        result = super()._quantity_in_progress()
+        for orderpoint in self:
+            print(
+                f"[AIP DEBUG][_quantity_in_progress] result orderpoint_id={orderpoint.id} "
+                f"product_id={orderpoint.product_id.id if orderpoint.product_id else False} "
+                f"location_id={orderpoint.location_id.id if orderpoint.location_id else False} "
+                f"qty_in_progress={result.get(orderpoint.id)} trigger={orderpoint.trigger}"
+            )
+        return result
+
+    def _prepare_procurement_values(self, date=False):
+        print(
+            f"[AIP DEBUG][_prepare_procurement_values] start orderpoint_ids={self.ids} date={date} "
+            f"context_keys={sorted(self.env.context.keys())}"
+        )
+        values = super()._prepare_procurement_values(date=date)
+        reference_ids = values.get('reference_ids')
+        warehouse_id = values.get('warehouse_id')
+        orderpoint_id = values.get('orderpoint_id')
+        bom_id = values.get('bom_id')
+        print(
+            f"[AIP DEBUG][_prepare_procurement_values] orderpoint_id={self.id if len(self) == 1 else self.ids} "
+            f"values_orderpoint_id={orderpoint_id.id if hasattr(orderpoint_id, 'id') else orderpoint_id} "
+            f"warehouse_id={warehouse_id.id if hasattr(warehouse_id, 'id') else warehouse_id} "
+            f"bom_id={bom_id.id if hasattr(bom_id, 'id') else bom_id} "
+            f"date_planned={values.get('date_planned')} date_order={values.get('date_order')} "
+            f"date_deadline={values.get('date_deadline')} "
+            f"reference_ids={reference_ids.ids if hasattr(reference_ids, 'ids') else reference_ids}"
+        )
+        return values
 
     @api.depends('product_id', 'location_id', 'product_id.stock_move_ids', 'product_id.stock_move_ids.state',
                  'product_id.stock_move_ids.date', 'product_id.stock_move_ids.product_uom_qty', 'product_id.seller_ids.delay')
     def _compute_qty(self):
         """Override to use our enhanced ML/Feasibility forecast for reordering logic."""
+        print(
+            f"[AIP DEBUG][_compute_qty] start orderpoints={self.ids} count={len(self)} "
+            f"context_keys={sorted(self.env.context.keys())}"
+        )
         orderpoints_contexts = defaultdict(lambda: self.env['stock.warehouse.orderpoint'])
         for orderpoint in self:
             if not orderpoint.product_id or not orderpoint.location_id:
+                print(
+                    f"[AIP DEBUG][_compute_qty] skip orderpoint_id={orderpoint.id} "
+                    f"product_id={orderpoint.product_id.id if orderpoint.product_id else False} "
+                    f"location_id={orderpoint.location_id.id if orderpoint.location_id else False}"
+                )
                 orderpoint.qty_on_hand = False
                 orderpoint.qty_forecast = False
                 continue
             orderpoint_context = orderpoint._get_product_context()
             product_context = frozendict({**orderpoint_context})
+            print(
+                f"[AIP DEBUG][_compute_qty] collected orderpoint_id={orderpoint.id} "
+                f"product_id={orderpoint.product_id.id} location_id={orderpoint.location_id.id} "
+                f"product_min_qty={orderpoint.product_min_qty} product_max_qty={orderpoint.product_max_qty} "
+                f"context={dict(product_context)}"
+            )
             orderpoints_contexts[product_context] |= orderpoint
             
         for orderpoint_context, orderpoints_by_context in orderpoints_contexts.items():
             # We read 'virtual_available_real' instead of 'virtual_available'
+            print(
+                f"[AIP DEBUG][_compute_qty] batch context={dict(orderpoint_context)} "
+                f"orderpoint_ids={orderpoints_by_context.ids}"
+            )
             products_qty = {
                 p['id']: p for p in orderpoints_by_context.product_id.with_context(orderpoint_context).read(
                     ['qty_available', 'virtual_available_real']
                 )
             }
             products_qty_in_progress = orderpoints_by_context._quantity_in_progress()
+            print(
+                f"[AIP DEBUG][_compute_qty] in_progress_map={{op_id: products_qty_in_progress.get(op_id) for op_id in orderpoints_by_context.ids}}"
+            )
             for orderpoint in orderpoints_by_context:
                 orderpoint.qty_on_hand = products_qty[orderpoint.product_id.id]['qty_available']
                 # Use virtual_available_real for smart forecasting
                 orderpoint.qty_forecast = products_qty[orderpoint.product_id.id]['virtual_available_real'] + products_qty_in_progress[orderpoint.id]
+                print(
+                    f"[AIP DEBUG][_compute_qty] result orderpoint_id={orderpoint.id} "
+                    f"product_id={orderpoint.product_id.id} qty_on_hand={orderpoint.qty_on_hand} "
+                    f"virtual_available_real={products_qty[orderpoint.product_id.id]['virtual_available_real']} "
+                    f"qty_in_progress={products_qty_in_progress[orderpoint.id]} "
+                    f"qty_forecast={orderpoint.qty_forecast}"
+                )
 
     def _get_qty_to_order(self, qty_in_progress_by_orderpoint=None):
         """Override to ensure the 'To Order' quantity is calculated based on virtual_available_real."""
         self.ensure_one()
+        print(
+            f"[AIP DEBUG][_get_qty_to_order] start orderpoint_id={self.id} product_id={self.product_id.id if self.product_id else False} "
+            f"location_id={self.location_id.id if self.location_id else False} qty_forecast={self.qty_forecast} "
+            f"product_min_qty={self.product_min_qty} product_max_qty={self.product_max_qty}"
+        )
         if not self.product_id or not self.location_id:
+            print(f"[AIP DEBUG][_get_qty_to_order] early_return_zero orderpoint_id={self.id}")
             return 0.0
             
         qty_to_order = 0.0
@@ -53,6 +124,10 @@ class StockWarehouseOrderpoint(models.Model):
         qty_in_progress = qty_in_progress_by_orderpoint.get(self.id)
         if qty_in_progress is None:
             qty_in_progress = self._quantity_in_progress()[self.id]
+        print(
+            f"[AIP DEBUG][_get_qty_to_order] qty_in_progress orderpoint_id={self.id} value={qty_in_progress} "
+            f"provided_map_keys={list(qty_in_progress_by_orderpoint.keys())}"
+        )
             
         rounding = self.product_uom.rounding
         # Use our enhanced qty_forecast (which already uses virtual_available_real)
@@ -64,6 +139,16 @@ class StockWarehouseOrderpoint(models.Model):
             
             qty_to_order = max(self.product_min_qty, self.product_max_qty) - qty_forecast_with_visibility
             qty_to_order = self._get_multiple_rounded_qty(qty_to_order)
+            print(
+                f"[AIP DEBUG][_get_qty_to_order] trigger orderpoint_id={self.id} "
+                f"context={product_context} virtual_available_real={res[0]['virtual_available_real']} "
+                f"qty_forecast_with_visibility={qty_forecast_with_visibility} qty_to_order={qty_to_order}"
+            )
+        else:
+            print(
+                f"[AIP DEBUG][_get_qty_to_order] no_procurement orderpoint_id={self.id} "
+                f"qty_forecast={self.qty_forecast} min_qty={self.product_min_qty}"
+            )
             
         return qty_to_order
 
@@ -279,9 +364,9 @@ class StockWarehouseOrderpoint(models.Model):
                     current_qty += move.product_qty
                 else:
                     outs_qty += move.product_qty
-                    current_qty -= move.product_qty
-                    if current_qty < max_missing_qty:
-                        max_missing_qty = current_qty
+                current_qty -= move.product_qty
+                if current_qty < max_missing_qty:
+                    max_missing_qty = current_qty
             breakdown[orderpoint.id]["enterprise_in_progress"] += outs_qty + max_missing_qty
 
     def _procure_orderpoint_confirm(self, use_new_cursor=False, company_id=None, raise_user_error=True):
@@ -291,19 +376,41 @@ class StockWarehouseOrderpoint(models.Model):
         SerializationFailure in Odoo 19. Instead, the logic is implemented 
         in product.py by enhancing virtual_available.
         """
-        context = dict(self.env.context)
-        context['smart_inventory_auto_creation'] = True
-
+        if use_new_cursor:
+            # Our custom replenishment flow can re-touch the same orderpoints
+            # in nested calls; forcing one transaction avoids parallel updates.
+            use_new_cursor = False
+        print(
+            f"[AIP DEBUG][_procure_orderpoint_confirm] start orderpoint_ids={self.ids} count={len(self)} "
+            f"use_new_cursor={use_new_cursor} company_id={company_id} raise_user_error={raise_user_error}"
+        )
         if not use_new_cursor:
             orderpoint_reasons = {}
             for orderpoint in self:
+                print(
+                    f"[AIP DEBUG][_procure_orderpoint_confirm] inspect orderpoint_id={orderpoint.id} "
+                    f"product_id={orderpoint.product_id.id if orderpoint.product_id else False} "
+                    f"qty_forecast={orderpoint.qty_forecast} min_qty={orderpoint.product_min_qty} "
+                    f"max_qty={orderpoint.product_max_qty} qty_to_order={orderpoint.qty_to_order} "
+                    f"trigger={orderpoint.trigger}"
+                )
                 if orderpoint.product_id and orderpoint.qty_forecast < orderpoint.product_min_qty:
                     target_date = orderpoint.lead_horizon_date.strftime("%d.%m.%Y") if orderpoint.lead_horizon_date else "найближчим часом"
                     orderpoint_reasons[orderpoint.id] = f"Передбачена відсутність товару {orderpoint.product_id.name} на дату {target_date}"
-            context['orderpoint_reasons'] = orderpoint_reasons
+                    print(
+                        f"[AIP DEBUG][_procure_orderpoint_confirm] reason_created orderpoint_id={orderpoint.id} "
+                        f"reason={orderpoint_reasons[orderpoint.id]}"
+                    )
+            print(
+                f"[AIP DEBUG][_procure_orderpoint_confirm] context_reasons_keys={list(orderpoint_reasons.keys())}"
+            )
 
-        return super(StockWarehouseOrderpoint, self.with_context(context))._procure_orderpoint_confirm(
-            use_new_cursor=use_new_cursor, 
-            company_id=company_id, 
+        print(
+            f"[AIP DEBUG][_procure_orderpoint_confirm] before_super orderpoint_ids={self.ids} "
+            f"context_keys={sorted(self.env.context.keys())}"
+        )
+        return super()._procure_orderpoint_confirm(
+            use_new_cursor=use_new_cursor,
+            company_id=company_id,
             raise_user_error=raise_user_error
         )

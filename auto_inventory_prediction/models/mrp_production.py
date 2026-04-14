@@ -16,10 +16,31 @@ class MrpProductionExtension(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         """Extend create to auto-fill creation information"""
+        print(
+            f"[AIP DEBUG][mrp.production.create] start vals_count={len(vals_list)} "
+            f"context_keys={sorted(self.env.context.keys())}"
+        )
+        for vals_index, vals in enumerate(vals_list):
+            print(
+                f"[AIP DEBUG][mrp.production.create] vals[{vals_index}] "
+                f"product_id={vals.get('product_id')} product_qty={vals.get('product_qty')} "
+                f"bom_id={vals.get('bom_id')} orderpoint_id={vals.get('orderpoint_id')} "
+                f"origin={vals.get('origin')} company_id={vals.get('company_id')}"
+            )
         records = super(MrpProductionExtension, self).create(vals_list)
+        print(
+            f"[AIP DEBUG][mrp.production.create] created_ids={records.ids} "
+            f"names={records.mapped('name')}"
+        )
 
         for record in records:
             try:
+                print(
+                    f"[AIP DEBUG][mrp.production.create] record id={record.id} name={record.name} "
+                    f"product_id={record.product_id.id if record.product_id else False} "
+                    f"product_qty={record.product_qty} orderpoint_id={record.orderpoint_id.id if record.orderpoint_id else False} "
+                    f"origin={record.origin} state={record.state}"
+                )
                 record._set_creation_information()
             except Exception as e:
                 _logger.error(f"Помилка при заповненні інформації про створення MO {record.name}: {str(e)}")

@@ -16,10 +16,30 @@ class PurchaseOrderExtension(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         """Extend create to auto-fill creation information"""
+        print(
+            f"[AIP DEBUG][purchase.order.create] start vals_count={len(vals_list)} "
+            f"context_keys={sorted(self.env.context.keys())}"
+        )
+        for vals_index, vals in enumerate(vals_list):
+            print(
+                f"[AIP DEBUG][purchase.order.create] vals[{vals_index}] "
+                f"partner_id={vals.get('partner_id')} origin={vals.get('origin')} "
+                f"date_order={vals.get('date_order')} picking_type_id={vals.get('picking_type_id')} "
+                f"company_id={vals.get('company_id')}"
+            )
         records = super(PurchaseOrderExtension, self).create(vals_list)
+        print(
+            f"[AIP DEBUG][purchase.order.create] created_ids={records.ids} "
+            f"names={records.mapped('name')}"
+        )
 
         for record in records:
             try:
+                print(
+                    f"[AIP DEBUG][purchase.order.create] record id={record.id} name={record.name} "
+                    f"origin={record.origin} partner_id={record.partner_id.id if record.partner_id else False} "
+                    f"order_line_count={len(record.order_line)}"
+                )
                 record._set_creation_information()
             except Exception as e:
                 _logger.error(f"Помилка при заповненні інформації про створення PO {record.name}: {str(e)}")
