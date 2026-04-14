@@ -183,7 +183,33 @@ class Product(models.Model):
             "<h5>3.4 Pending raw MO для dedup indirect demand</h5>",
             dedup_links,
             "<hr/>",
-            "<h4>4) Словник метрик</h4>",
+            "<h4>4) Трасування ключових метрик</h4>",
+            "<table class='table table-sm table-bordered'>",
+            "<thead><tr><th>Метрика</th><th>Як обчислюється</th><th>Звідки беруться дані</th></tr></thead>",
+            "<tbody>",
+            "<tr>"
+            f"<td>virtual_available = {standard_virtual:.2f}</td>"
+            f"<td>qty_available + incoming_qty - outgoing_qty = {qty_available:.2f} + {standard_incoming:.2f} - {outgoing_qty:.2f}</td>"
+            "<td>Базовий stock forecast Odoo; документи див. 3.2 (incoming) і 3.3 (outgoing).</td>"
+            "</tr>",
+            "<tr>"
+            f"<td>incoming_qty = {standard_incoming:.2f}</td>"
+            "<td>Сума запланованих вхідних moves у горизонті</td>"
+            "<td>Документально: таблиця 3.2 (Stock Moves / MO).</td>"
+            "</tr>",
+            "<tr>"
+            f"<td>incoming_reliable_qty = {reliable_incoming:.2f}</td>"
+            f"<td>incoming_non_mo_qty + incoming_mo_feasible_qty = {non_mo_incoming:.2f} + {mo_feasible:.2f}</td>"
+            "<td>Похідне від надійності MO-компонентів; базові документи див. 3.2 (incoming moves + MO).</td>"
+            "</tr>",
+            "<tr>"
+            f"<td>unconfirmed_outgoing_qty = {ml_outgoing:.2f}</td>"
+            f"<td>unconfirmed_outgoing_direct_qty + unconfirmed_outgoing_indirect_qty (після dedup)</td>"
+            "<td>Документально: 3.1 (SO джерела ML) + 3.4 (raw MO для dedup, якщо є).</td>"
+            "</tr>",
+            "</tbody></table>",
+            "<hr/>",
+            "<h4>5) Словник метрик</h4>",
             "<table class='table table-sm table-bordered'>",
             "<thead><tr><th>Метрика</th><th>Значення</th><th>Пояснення</th></tr></thead>",
             "<tbody>",
