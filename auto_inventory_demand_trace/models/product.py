@@ -69,13 +69,11 @@ class Product(models.Model):
         })
         return True
 
-    def _build_forecast_validation_html(self):
+    def _get_forecast_formula_snapshot(self, to_date=False):
         self.ensure_one()
         product = self.sudo()
-        to_date = fields.Datetime.today() + relativedelta.relativedelta(days=90)
+        to_date = to_date or (fields.Datetime.today() + relativedelta.relativedelta(days=90))
         breakdown = product._get_detailed_forecast_breakdown(to_date=to_date).get(product.id, {})
-        unconfirmed_result = product._get_products_qty_in_unconfirmed_quotations(to_date=to_date).get(product.id, {})
-
         standard_virtual = breakdown.get("virtual_available", 0.0)
         standard_incoming = breakdown.get("incoming_qty", 0.0)
         reliable_incoming = breakdown.get("incoming_reliable_qty", standard_incoming)
@@ -83,7 +81,34 @@ class Product(models.Model):
         expected_virtual_real = standard_virtual - (standard_incoming - reliable_incoming) - ml_outgoing
         actual_virtual_real = product.with_context(to_date=to_date).virtual_available_real
         formula_delta = actual_virtual_real - expected_virtual_real
-        formula_ok = abs(formula_delta) < 1e-6
+        return {
+            "to_date": to_date,
+            "breakdown": breakdown,
+            "standard_virtual": standard_virtual,
+            "standard_incoming": standard_incoming,
+            "reliable_incoming": reliable_incoming,
+            "ml_outgoing": ml_outgoing,
+            "expected_virtual_real": expected_virtual_real,
+            "actual_virtual_real": actual_virtual_real,
+            "formula_delta": formula_delta,
+            "formula_ok": abs(formula_delta) < 1e-6,
+        }
+
+    def _build_forecast_validation_html(self):
+        self.ensure_one()
+        product = self.sudo()
+        snapshot = product._get_forecast_formula_snapshot()
+        to_date = snapshot["to_date"]
+        breakdown = snapshot["breakdown"]
+        unconfirmed_result = product._get_products_qty_in_unconfirmed_quotations(to_date=to_date).get(product.id, {})
+        standard_virtual = snapshot["standard_virtual"]
+        standard_incoming = snapshot["standard_incoming"]
+        reliable_incoming = snapshot["reliable_incoming"]
+        ml_outgoing = snapshot["ml_outgoing"]
+        expected_virtual_real = snapshot["expected_virtual_real"]
+        actual_virtual_real = snapshot["actual_virtual_real"]
+        formula_delta = snapshot["formula_delta"]
+        formula_ok = snapshot["formula_ok"]
 
         outgoing_links = self._build_unconfirmed_outgoing_links(unconfirmed_result)
         incoming_links = self._build_incoming_source_links(product, to_date=to_date)
@@ -105,44 +130,6 @@ class Product(models.Model):
         virtual_ml = breakdown.get("virtual_available_ml", 0.0)
         reliable_standard = breakdown.get("standard_forecast_reliable", 0.0)
 
-        check_rows = [
-            (
-                "incoming_qty = incoming_non_mo_qty + incoming_mo_scheduled_qty",
-                standard_incoming,
-                non_mo_incoming + mo_scheduled,
-            ),
-            (
-                "incoming_reliable_qty = incoming_non_mo_qty + incoming_mo_feasible_qty",
-                reliable_incoming,
-                non_mo_incoming + mo_feasible,
-            ),
-            (
-                "incoming_mo_scheduled_qty = incoming_mo_feasible_qty + incoming_mo_unfeasible_qty",
-                mo_scheduled,
-                mo_feasible + mo_unfeasible,
-            ),
-            (
-                "virtual_available = qty_available + incoming_qty - outgoing_qty",
-                standard_virtual,
-                qty_available + standard_incoming - outgoing_qty,
-            ),
-            (
-                "virtual_available_ml = virtual_available - unconfirmed_outgoing_qty",
-                virtual_ml,
-                standard_virtual - ml_outgoing,
-            ),
-            (
-                "standard_forecast_reliable = qty_available + incoming_reliable_qty - outgoing_qty",
-                reliable_standard,
-                qty_available + reliable_incoming - outgoing_qty,
-            ),
-            (
-                "virtual_available_real = standard_forecast_reliable - unconfirmed_outgoing_qty",
-                actual_virtual_real,
-                reliable_standard - ml_outgoing,
-            ),
-        ]
-
         html = [
             "<div class='o_forecast_validation_report'>",
             f"<h3>Перевірка формули прогнозу: {escape(product.display_name)}</h3>",
@@ -151,7 +138,7 @@ class Product(models.Model):
             "<hr/>",
             "<h4>1) Формула virtual_available_real</h4>",
             "<p><code>virtual_available_real = virtual_available - (incoming_qty - incoming_reliable_qty) - unconfirmed_outgoing_qty</code></p>",
-            "<h5>1.1 Розклад параметрів формули (таблиця)</h5>",
+            "<h5>1.1 Розклад параметрів формули</h5>",
             "<table class='table table-sm table-bordered'>"
             "<thead><tr><th>Параметр</th><th>Значення</th></tr></thead>"
             "<tbody>",
@@ -163,7 +150,7 @@ class Product(models.Model):
             f"<tr><td><strong>Фактичне virtual_available_real</strong></td><td><strong>{actual_virtual_real:.2f}</strong></td></tr>",
             f"<tr><td><strong>Різниця (fact - expected)</strong></td><td><strong>{formula_delta:.6f}</strong></td></tr>",
             "</tbody></table>",
-            "<h5>1.2 Покрокова арифметика (рядок-в-рядок)</h5>",
+            "<h5>1.2 Покрокова арифметика</h5>",
             "<table class='table table-sm table-bordered'>"
             "<thead><tr><th>Крок</th><th>Вираз</th><th>Результат</th></tr></thead>"
             "<tbody>",
@@ -186,7 +173,7 @@ class Product(models.Model):
             f"<tr><td>incoming_missing_qty</td><td>{breakdown.get('incoming_missing_qty', 0.0):.2f}</td></tr>",
             "</tbody></table>",
             "<hr/>",
-            "<h4>3) Документи-джерела (клікабельні посилання)</h4>",
+            "<h4>3) Документи-джерела</h4>",
             "<h5>3.1 ML Outgoing з комерційних пропозицій (SO)</h5>",
             outgoing_links,
             "<h5>3.2 Вхідні документи (Stock Moves / MO)</h5>",
@@ -196,21 +183,7 @@ class Product(models.Model):
             "<h5>3.4 Pending raw MO для dedup indirect demand</h5>",
             dedup_links,
             "<hr/>",
-            "<h4>4) Контрольні перевірки рівностей (повнота пояснення)</h4>",
-            "<table class='table table-sm table-bordered'>",
-            "<thead><tr><th>Перевірка</th><th>Ліва частина</th><th>Права частина</th><th>Delta</th><th>Статус</th></tr></thead>",
-            "<tbody>",
-            *[
-                (
-                    f"<tr><td>{escape(name)}</td>"
-                    f"<td>{left:.4f}</td><td>{right:.4f}</td>"
-                    f"<td>{(left - right):.6f}</td>"
-                    f"<td>{'PASS' if abs(left - right) < 1e-6 else 'FAIL'}</td></tr>"
-                )
-                for name, left, right in check_rows
-            ],
-            "</tbody></table>",
-            "<h4>5) Словник метрик (що означає кожне число)</h4>",
+            "<h4>4) Словник метрик</h4>",
             "<table class='table table-sm table-bordered'>",
             "<thead><tr><th>Метрика</th><th>Значення</th><th>Пояснення</th></tr></thead>",
             "<tbody>",
@@ -1046,16 +1019,61 @@ class ProductTemplate(models.Model):
 
     def _compute_forecast_validation_fields(self):
         for template in self:
-            variant = template.product_variant_id or template.product_variant_ids[:1]
-            template.forecast_validation_html = variant.forecast_validation_html if variant else False
-            template.forecast_validation_last_run = variant.forecast_validation_last_run if variant else False
+            variants = template.product_variant_ids.sudo()
+            if not variants:
+                template.forecast_validation_html = "<p><strong>Немає варіантів продукту.</strong></p>"
+                template.forecast_validation_last_run = False
+                continue
+            if len(variants) == 1:
+                variant = variants[0]
+                template.forecast_validation_html = variant.forecast_validation_html or (
+                    "<p><em>Для цього продукту доступний детальний звіт одного варіанта. "
+                    "Натисніть кнопку перевірки.</em></p>"
+                )
+                template.forecast_validation_last_run = variant.forecast_validation_last_run
+                continue
+
+            rows = [
+                "<div class='o_forecast_validation_report'>",
+                f"<h3>Зведена перевірка по варіантах: {escape(template.display_name)}</h3>",
+                "<p>Для повного розбору натисніть на конкретний варіант у таблиці.</p>",
+                "<table class='table table-sm table-bordered'>",
+                "<thead><tr>"
+                "<th>Варіант</th><th>Статус</th><th>Expected</th><th>Actual</th><th>Delta</th><th>Last Run</th>"
+                "</tr></thead><tbody>",
+            ]
+
+            latest_run = False
+            for variant in variants:
+                snapshot = variant._get_forecast_formula_snapshot()
+                status = "PASS" if snapshot["formula_ok"] else "FAIL"
+                status_color = "#198754" if snapshot["formula_ok"] else "#dc3545"
+                last_run = variant.forecast_validation_last_run
+                if last_run and (not latest_run or last_run > latest_run):
+                    latest_run = last_run
+                variant_link = f"/web#id={variant.id}&model=product.product&view_type=form"
+                rows.append(
+                    "<tr>"
+                    f"<td><a href='{variant_link}'>{escape(variant.display_name)}</a></td>"
+                    f"<td><span style='color:{status_color};'><strong>{status}</strong></span></td>"
+                    f"<td>{snapshot['expected_virtual_real']:.2f}</td>"
+                    f"<td>{snapshot['actual_virtual_real']:.2f}</td>"
+                    f"<td>{snapshot['formula_delta']:.6f}</td>"
+                    f"<td>{last_run or '-'}</td>"
+                    "</tr>"
+                )
+
+            rows.append("</tbody></table></div>")
+            template.forecast_validation_html = "".join(rows)
+            template.forecast_validation_last_run = latest_run
 
     def action_validate_forecast_formula(self):
         self.ensure_one()
-        variant = self.product_variant_id or self.product_variant_ids[:1]
-        if not variant:
+        variants = self.product_variant_ids.sudo()
+        if not variants:
             return True
-        variant.action_validate_forecast_formula()
+        for variant in variants:
+            variant.action_validate_forecast_formula()
         return True
 
     @api.depends(
