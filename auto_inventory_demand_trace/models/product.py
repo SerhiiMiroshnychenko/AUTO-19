@@ -2,6 +2,7 @@ from math import ceil
 from collections import defaultdict
 from dateutil import relativedelta
 from datetime import datetime, time
+from html import escape
 
 from odoo import models, fields, api
 from odoo.tools.float_utils import float_round
@@ -49,6 +50,200 @@ class Product(models.Model):
     virtual_available_real = fields.Float(
         "Virtual Available Real", compute="_compute_quantities", compute_sudo=False
     )
+    forecast_validation_html = fields.Html(
+        "Forecast Formula Validation",
+        readonly=True,
+        sanitize=False,
+        help="Detailed validation report for selected variant forecast formula.",
+    )
+    forecast_validation_last_run = fields.Datetime(
+        "Forecast Validation Last Run",
+        readonly=True,
+    )
+
+    def action_validate_forecast_formula(self):
+        self.ensure_one()
+        self.sudo().write({
+            "forecast_validation_html": self._build_forecast_validation_html(),
+            "forecast_validation_last_run": fields.Datetime.now(),
+        })
+        return True
+
+    def _build_forecast_validation_html(self):
+        self.ensure_one()
+        product = self.sudo()
+        to_date = fields.Datetime.today() + relativedelta.relativedelta(days=90)
+        breakdown = product._get_detailed_forecast_breakdown(to_date=to_date).get(product.id, {})
+        unconfirmed_result = product._get_products_qty_in_unconfirmed_quotations(to_date=to_date).get(product.id, {})
+
+        standard_virtual = breakdown.get("virtual_available", 0.0)
+        standard_incoming = breakdown.get("incoming_qty", 0.0)
+        reliable_incoming = breakdown.get("incoming_reliable_qty", standard_incoming)
+        ml_outgoing = breakdown.get("unconfirmed_outgoing_qty", 0.0)
+        expected_virtual_real = standard_virtual - (standard_incoming - reliable_incoming) - ml_outgoing
+        actual_virtual_real = product.with_context(to_date=to_date).virtual_available_real
+        formula_delta = actual_virtual_real - expected_virtual_real
+        formula_ok = abs(formula_delta) < 1e-6
+
+        outgoing_links = self._build_unconfirmed_outgoing_links(unconfirmed_result)
+        incoming_links = self._build_incoming_source_links(product, to_date=to_date)
+        dedup_links = self._build_pending_mo_raw_links(product, to_date=to_date)
+
+        status_color = "#198754" if formula_ok else "#dc3545"
+        status_text = "PASS" if formula_ok else "FAIL"
+
+        incoming_gap = standard_incoming - reliable_incoming
+        step_1 = standard_virtual - incoming_gap
+        step_2 = step_1 - ml_outgoing
+
+        html = [
+            "<div class='o_forecast_validation_report'>",
+            f"<h3>Перевірка формули прогнозу: {escape(product.display_name)}</h3>",
+            f"<p><strong>Дата перевірки:</strong> {fields.Datetime.now()}</p>",
+            f"<p><strong>Статус:</strong> <span style='color:{status_color};'><strong>{status_text}</strong></span></p>",
+            "<hr/>",
+            "<h4>1) Формула virtual_available_real</h4>",
+            "<p><code>virtual_available_real = virtual_available - (incoming_qty - incoming_reliable_qty) - unconfirmed_outgoing_qty</code></p>",
+            "<h5>1.1 Розклад параметрів формули (таблиця)</h5>",
+            "<table class='table table-sm table-bordered'>"
+            "<thead><tr><th>Параметр</th><th>Значення</th></tr></thead>"
+            "<tbody>",
+            f"<tr><td>virtual_available</td><td>{standard_virtual:.2f}</td></tr>",
+            f"<tr><td>incoming_qty</td><td>{standard_incoming:.2f}</td></tr>",
+            f"<tr><td>incoming_reliable_qty</td><td>{reliable_incoming:.2f}</td></tr>",
+            f"<tr><td>unconfirmed_outgoing_qty</td><td>{ml_outgoing:.2f}</td></tr>",
+            f"<tr><td><strong>Очікуване virtual_available_real</strong></td><td><strong>{expected_virtual_real:.2f}</strong></td></tr>",
+            f"<tr><td><strong>Фактичне virtual_available_real</strong></td><td><strong>{actual_virtual_real:.2f}</strong></td></tr>",
+            f"<tr><td><strong>Різниця (fact - expected)</strong></td><td><strong>{formula_delta:.6f}</strong></td></tr>",
+            "</tbody></table>",
+            "<h5>1.2 Покрокова арифметика (рядок-в-рядок)</h5>",
+            "<table class='table table-sm table-bordered'>"
+            "<thead><tr><th>Крок</th><th>Вираз</th><th>Результат</th></tr></thead>"
+            "<tbody>",
+            f"<tr><td>Крок 1</td><td>incoming_gap = incoming_qty - incoming_reliable_qty = {standard_incoming:.2f} - {reliable_incoming:.2f}</td><td>{incoming_gap:.2f}</td></tr>",
+            f"<tr><td>Крок 2</td><td>base_after_reliability = virtual_available - incoming_gap = {standard_virtual:.2f} - {incoming_gap:.2f}</td><td>{step_1:.2f}</td></tr>",
+            f"<tr><td>Крок 3</td><td>expected_virtual_available_real = base_after_reliability - unconfirmed_outgoing_qty = {step_1:.2f} - {ml_outgoing:.2f}</td><td>{step_2:.2f}</td></tr>",
+            "</tbody></table>",
+            "<hr/>",
+            "<h4>2) Розклад вхідних/вихідних складових</h4>",
+            "<table class='table table-sm table-bordered'>"
+            "<thead><tr><th>Складова</th><th>Значення</th></tr></thead>"
+            "<tbody>",
+            f"<tr><td>qty_available</td><td>{breakdown.get('qty_available', 0.0):.2f}</td></tr>",
+            f"<tr><td>outgoing_qty</td><td>{breakdown.get('outgoing_qty', 0.0):.2f}</td></tr>",
+            f"<tr><td>unconfirmed_outgoing_direct_qty</td><td>{breakdown.get('unconfirmed_outgoing_direct_qty', 0.0):.2f}</td></tr>",
+            f"<tr><td>unconfirmed_outgoing_indirect_qty</td><td>{breakdown.get('unconfirmed_outgoing_indirect_qty', 0.0):.2f}</td></tr>",
+            f"<tr><td>incoming_non_mo_qty</td><td>{breakdown.get('incoming_non_mo_qty', 0.0):.2f}</td></tr>",
+            f"<tr><td>incoming_mo_feasible_qty</td><td>{breakdown.get('incoming_mo_feasible_qty', 0.0):.2f}</td></tr>",
+            f"<tr><td>incoming_mo_unfeasible_qty</td><td>{breakdown.get('incoming_mo_unfeasible_qty', 0.0):.2f}</td></tr>",
+            f"<tr><td>incoming_missing_qty</td><td>{breakdown.get('incoming_missing_qty', 0.0):.2f}</td></tr>",
+            "</tbody></table>",
+            "<hr/>",
+            "<h4>3) Документи-джерела (клікабельні посилання)</h4>",
+            "<h5>3.1 ML Outgoing з комерційних пропозицій (SO)</h5>",
+            outgoing_links,
+            "<h5>3.2 Вхідні документи (Stock Moves / MO)</h5>",
+            incoming_links,
+            "<h5>3.3 Pending raw MO для dedup indirect demand</h5>",
+            dedup_links,
+            "</div>",
+        ]
+        return "".join(html)
+
+    def _build_unconfirmed_outgoing_links(self, unconfirmed_result):
+        orders = list(unconfirmed_result.get("orders", {}).values())
+        if not orders:
+            return "<p><em>Немає джерел SO для unconfirmed outgoing.</em></p>"
+        rows = [
+            "<table class='table table-sm table-bordered'>",
+            "<thead><tr><th>SO</th><th>Final</th><th>Direct</th><th>Indirect</th><th>Probability %</th></tr></thead>",
+            "<tbody>",
+        ]
+        for order in sorted(orders, key=lambda x: x.get("id", 0)):
+            order_id = order.get("id")
+            order_name = escape(order.get("name", f"SO {order_id}"))
+            rows.append(
+                "<tr>"
+                f"<td><a href='/web#id={order_id}&model=sale.order&view_type=form'>{order_name}</a></td>"
+                f"<td>{order.get('final_value', 0.0):.2f}</td>"
+                f"<td>{order.get('direct_value', 0.0):.2f}</td>"
+                f"<td>{order.get('indirect_value', 0.0):.2f}</td>"
+                f"<td>{order.get('ml_probability', 0.0) * 100.0:.2f}</td>"
+                "</tr>"
+            )
+        rows.append("</tbody></table>")
+        return "".join(rows)
+
+    def _build_incoming_source_links(self, product, to_date=False):
+        _, domain_move_in_loc, _ = product._get_domain_locations()
+        domain = [
+            ("product_id", "=", product.id),
+            ("state", "in", ("waiting", "confirmed", "assigned", "partially_available")),
+        ] + domain_move_in_loc
+        if to_date:
+            domain.append(("date", "<=", to_date))
+        moves = product.env["stock.move"].sudo().search(domain, order="date asc, id asc")
+        if not moves:
+            return "<p><em>Немає вхідних move-документів у горизонті.</em></p>"
+        rows = [
+            "<table class='table table-sm table-bordered'>",
+            "<thead><tr><th>Stock Move</th><th>Qty</th><th>State</th><th>MO</th></tr></thead>",
+            "<tbody>",
+        ]
+        for move in moves:
+            move_name = escape(move.reference or move.picking_id.name or move.name or f"MOVE {move.id}")
+            move_link = f"/web#id={move.id}&model=stock.move&view_type=form"
+            mo_cell = "-"
+            if move.production_id:
+                mo_cell = (
+                    f"<a href='/web#id={move.production_id.id}&model=mrp.production&view_type=form'>"
+                    f"{escape(move.production_id.name)}</a>"
+                )
+            rows.append(
+                "<tr>"
+                f"<td><a href='{move_link}'>{move_name}</a></td>"
+                f"<td>{move.product_qty:.2f}</td>"
+                f"<td>{escape(move.state)}</td>"
+                f"<td>{mo_cell}</td>"
+                "</tr>"
+            )
+        rows.append("</tbody></table>")
+        return "".join(rows)
+
+    def _build_pending_mo_raw_links(self, product, to_date=False):
+        _, _, domain_move_out_loc = product._get_domain_locations()
+        domain = [
+            ("product_id", "=", product.id),
+            ("raw_material_production_id", "!=", False),
+            ("state", "in", ("waiting", "confirmed", "assigned", "partially_available")),
+        ] + domain_move_out_loc
+        if to_date:
+            domain.append(("date", "<=", to_date))
+        raw_moves = product.env["stock.move"].sudo().search(domain, order="date asc, id asc")
+        if not raw_moves:
+            return "<p><em>Немає pending raw moves для dedup.</em></p>"
+        rows = [
+            "<table class='table table-sm table-bordered'>",
+            "<thead><tr><th>Raw Move</th><th>Qty</th><th>State</th><th>MO</th></tr></thead>",
+            "<tbody>",
+        ]
+        for move in raw_moves:
+            move_link = f"/web#id={move.id}&model=stock.move&view_type=form"
+            mo = move.raw_material_production_id
+            mo_cell = (
+                f"<a href='/web#id={mo.id}&model=mrp.production&view_type=form'>{escape(mo.name)}</a>"
+                if mo else "-"
+            )
+            rows.append(
+                "<tr>"
+                f"<td><a href='{move_link}'>{escape(move.reference or move.name or f'RAW MOVE {move.id}')}</a></td>"
+                f"<td>{move.product_qty:.2f}</td>"
+                f"<td>{escape(move.state)}</td>"
+                f"<td>{mo_cell}</td>"
+                "</tr>"
+            )
+        rows.append("</tbody></table>")
+        return "".join(rows)
 
     @api.depends(
         "stock_move_ids.product_qty", "stock_move_ids.state", "stock_move_ids.quantity"
@@ -706,6 +901,16 @@ class ProductTemplate(models.Model):
     virtual_available_real = fields.Float(
         "Virtual Available Real", compute="_compute_quantities", compute_sudo=False
     )
+    forecast_validation_html = fields.Html(
+        "Forecast Formula Validation",
+        readonly=True,
+        sanitize=False,
+        help="Detailed validation report for template forecast formula.",
+    )
+    forecast_validation_last_run = fields.Datetime(
+        "Forecast Validation Last Run",
+        readonly=True,
+    )
 
     skip_when_computing_component_quantities = fields.Boolean(
         compute="_compute_skip_when_computing_component_quantities"
@@ -714,6 +919,22 @@ class ProductTemplate(models.Model):
     def _compute_skip_when_computing_component_quantities(self):
         for template in self:
             template.skip_when_computing_component_quantities = False
+
+    def action_validate_forecast_formula(self):
+        self.ensure_one()
+        variant = self.product_variant_id or self.product_variant_ids[:1]
+        if not variant:
+            self.sudo().write({
+                "forecast_validation_html": "<p><strong>Немає варіанта продукту для перевірки.</strong></p>",
+                "forecast_validation_last_run": fields.Datetime.now(),
+            })
+            return True
+        variant.action_validate_forecast_formula()
+        self.sudo().write({
+            "forecast_validation_html": variant.forecast_validation_html,
+            "forecast_validation_last_run": variant.forecast_validation_last_run,
+        })
+        return True
 
     @api.depends(
         "product_variant_ids.qty_available",

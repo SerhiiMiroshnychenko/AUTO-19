@@ -28,6 +28,22 @@
                     <xpath expr="//field[@name='barcode']" position="after">
                         <field name="old_name" help="Назва продукту в старій базі для точного мапінгу з CSV історичними даними"/>
                     </xpath>
+                    <xpath expr="//notebook" position="inside">
+                        <page string="Forecast Validation">
+                            <group>
+                                <button
+                                    name="action_validate_forecast_formula"
+                                    type="object"
+                                    string="Перевірити формулу прогнозу"
+                                    class="btn-primary"
+                                />
+                                <field name="forecast_validation_last_run" readonly="1"/>
+                            </group>
+                            <group>
+                                <field name="forecast_validation_html" widget="html" readonly="1"/>
+                            </group>
+                        </page>
+                    </xpath>
                 </data>
             </field>
         </record>
@@ -58,6 +74,22 @@
                     <!-- Add legacy name mapping after barcode -->
                     <xpath expr="//field[@name='barcode']" position="after">
                         <field name="old_name" help="Назва продукту в старій базі для точного мапінгу з CSV історичними даними"/>
+                    </xpath>
+                    <xpath expr="//notebook" position="inside">
+                        <page string="Forecast Validation">
+                            <group>
+                                <button
+                                    name="action_validate_forecast_formula"
+                                    type="object"
+                                    string="Перевірити формулу прогнозу"
+                                    class="btn-primary"
+                                />
+                                <field name="forecast_validation_last_run" readonly="1"/>
+                            </group>
+                            <group>
+                                <field name="forecast_validation_html" widget="html" readonly="1"/>
+                            </group>
+                        </page>
                     </xpath>
                 </data>
             </field>
