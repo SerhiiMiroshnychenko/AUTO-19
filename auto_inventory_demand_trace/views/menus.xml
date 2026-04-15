@@ -3,9 +3,9 @@
     <!-- Root menu -->
     <menuitem
         id="menu_auto_inventory_prediction_root"
-        name="Auto Inventory Prediction"
-        web_icon="auto_inventory_prediction,static/description/icon.png"
-        sequence="31"
+        name="Auto Inventory"
+        web_icon="auto_inventory_demand_trace,static/description/icon.png"
+        sequence="1"
     />
 
     <!-- Prediction Models -->
