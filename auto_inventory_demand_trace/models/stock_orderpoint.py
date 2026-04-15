@@ -394,36 +394,42 @@ class StockWarehouseOrderpoint(models.Model):
             # Our custom replenishment flow can re-touch the same orderpoints
             # in nested calls; forcing one transaction avoids parallel updates.
             use_new_cursor = False
+            
+        orderpoint_reasons = {}
         print(
             f"[AIP DEBUG][_procure_orderpoint_confirm] start orderpoint_ids={self.ids} count={len(self)} "
             f"use_new_cursor={use_new_cursor} company_id={company_id} raise_user_error={raise_user_error}"
         )
-        if not use_new_cursor:
-            orderpoint_reasons = {}
-            for orderpoint in self:
-                print(
-                    f"[AIP DEBUG][_procure_orderpoint_confirm] inspect orderpoint_id={orderpoint.id} "
-                    f"product_id={orderpoint.product_id.id if orderpoint.product_id else False} "
-                    f"qty_forecast={orderpoint.qty_forecast} min_qty={orderpoint.product_min_qty} "
-                    f"max_qty={orderpoint.product_max_qty} qty_to_order={orderpoint.qty_to_order} "
-                    f"trigger={orderpoint.trigger}"
-                )
-                if orderpoint.product_id and orderpoint.qty_forecast < orderpoint.product_min_qty:
-                    target_date = orderpoint.lead_horizon_date.strftime("%d.%m.%Y") if orderpoint.lead_horizon_date else "найближчим часом"
-                    orderpoint_reasons[orderpoint.id] = f"Передбачена відсутність товару {orderpoint.product_id.name} на дату {target_date}"
-                    print(
-                        f"[AIP DEBUG][_procure_orderpoint_confirm] reason_created orderpoint_id={orderpoint.id} "
-                        f"reason={orderpoint_reasons[orderpoint.id]}"
-                    )
+        for orderpoint in self:
             print(
-                f"[AIP DEBUG][_procure_orderpoint_confirm] context_reasons_keys={list(orderpoint_reasons.keys())}"
+                f"[AIP DEBUG][_procure_orderpoint_confirm] inspect orderpoint_id={orderpoint.id} "
+                f"product_id={orderpoint.product_id.id if orderpoint.product_id else False} "
+                f"qty_forecast={orderpoint.qty_forecast} min_qty={orderpoint.product_min_qty} "
+                f"max_qty={orderpoint.product_max_qty} qty_to_order={orderpoint.qty_to_order} "
+                f"trigger={orderpoint.trigger}"
             )
+            if orderpoint.product_id and orderpoint.qty_forecast < orderpoint.product_min_qty:
+                target_date = orderpoint.lead_horizon_date.strftime("%d.%m.%Y") if orderpoint.lead_horizon_date else "найближчим часом"
+                orderpoint_reasons[orderpoint.id] = f"Передбачена відсутність товару {orderpoint.product_id.name} на дату {target_date}"
+                print(
+                    f"[AIP DEBUG][_procure_orderpoint_confirm] reason_created orderpoint_id={orderpoint.id} "
+                    f"reason={orderpoint_reasons[orderpoint.id]}"
+                )
+        print(
+            f"[AIP DEBUG][_procure_orderpoint_confirm] context_reasons_keys={list(orderpoint_reasons.keys())}"
+        )
 
         print(
             f"[AIP DEBUG][_procure_orderpoint_confirm] before_super orderpoint_ids={self.ids} "
             f"context_keys={sorted(self.env.context.keys())}"
         )
-        return super()._procure_orderpoint_confirm(
+        # AIP: Pass auto-creation context and reasons to downstream create() calls (PO, MO, etc.)
+        # Ensure context is serializable for queued background tasks
+        safe_reasons = {int(k): v for k, v in orderpoint_reasons.items() if isinstance(k, int) or (hasattr(k, 'id') and isinstance(k.id, int))}
+        return super(StockWarehouseOrderpoint, self.with_context(
+            smart_inventory_auto_creation=True,
+            orderpoint_reasons=safe_reasons
+        ))._procure_orderpoint_confirm(
             use_new_cursor=use_new_cursor,
             company_id=company_id,
             raise_user_error=raise_user_error
