@@ -60,7 +60,7 @@ class MlDemandWave(models.Model):
         return datetime.combine(from_date.date(), time.min)
 
     @api.model
-    def get_or_build_active_wave(self, warehouse_id=False, from_date=False, to_date=False):
+    def get_or_build_active_wave(self, warehouse_id=False, from_date=False, to_date=False, rebuild=True):
         sudo_self = self.sudo()
         warehouse = (
             sudo_self.env["stock.warehouse"].browse(warehouse_id)
@@ -80,6 +80,9 @@ class MlDemandWave(models.Model):
         active_waves = sudo_self.search(domain, order="id desc")
         wave = active_waves[:1]
         if wave:
+            if not rebuild:
+                return self.browse(wave.id)
+
             # Enforce single active wave per warehouse/company.
             if len(active_waves) > 1:
                 (active_waves - wave).write({"state": "closed"})
@@ -99,6 +102,10 @@ class MlDemandWave(models.Model):
 
             wave.rebuild_from_quotations()
             return self.browse(wave.id)
+
+        if not rebuild:
+            return self.env["ml.demand.wave"]
+
         wave = sudo_self.build_wave_from_quotations(
             warehouse_id=warehouse.id,
             from_date=norm_from_date,
@@ -491,9 +498,9 @@ class MlDemandWave(models.Model):
             line.is_active = line.effective_qty > 0
 
     @api.model
-    def aggregate_for_products(self, product_ids, warehouse_id=False, from_date=False, to_date=False):
+    def aggregate_for_products(self, product_ids, warehouse_id=False, from_date=False, to_date=False, readonly=False):
         wave = self.get_or_build_active_wave(
-            warehouse_id=warehouse_id, from_date=from_date, to_date=to_date
+            warehouse_id=warehouse_id, from_date=from_date, to_date=to_date, rebuild=not readonly
         )
         res = {
             pid: {"orders": {}, "qty": 0.0, "direct_qty": 0.0, "indirect_qty": 0.0}

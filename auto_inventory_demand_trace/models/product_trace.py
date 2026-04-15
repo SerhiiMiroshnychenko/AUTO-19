@@ -13,4 +13,5 @@ class ProductDemandTrace(models.Model):
             warehouse_id=warehouse_id,
             from_date=from_date,
             to_date=to_date,
+            readonly=True,
         )
