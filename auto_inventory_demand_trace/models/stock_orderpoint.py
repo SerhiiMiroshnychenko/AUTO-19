@@ -80,6 +80,10 @@ class StockWarehouseOrderpoint(models.Model):
             )
             orderpoints_contexts[product_context] |= orderpoint
             
+        # Collect all results in a local dictionary first. This is crucial because 
+        # database writes triggered by Batch 2+ (e.g., during ML wave recomputation 
+        # inside read()) can invalidate the cache and erase assignments made in Batch 1.
+        computed_results = {}
         for orderpoint_context, orderpoints_by_context in orderpoints_contexts.items():
             # We read 'virtual_available_real' instead of 'virtual_available'
             print(
@@ -96,16 +100,26 @@ class StockWarehouseOrderpoint(models.Model):
                 f"[AIP DEBUG][_compute_qty] in_progress_map={{op_id: products_qty_in_progress.get(op_id) for op_id in orderpoints_by_context.ids}}"
             )
             for orderpoint in orderpoints_by_context:
-                orderpoint.qty_on_hand = products_qty[orderpoint.product_id.id]['qty_available']
-                # Use virtual_available_real for smart forecasting
-                orderpoint.qty_forecast = products_qty[orderpoint.product_id.id]['virtual_available_real'] + products_qty_in_progress[orderpoint.id]
+                # Keep original direct access to fail fast on missing data
+                qty_on_hand = products_qty[orderpoint.product_id.id]['qty_available']
+                qty_forecast = products_qty[orderpoint.product_id.id]['virtual_available_real'] + products_qty_in_progress[orderpoint.id]
+                
+                computed_results[orderpoint.id] = (qty_on_hand, qty_forecast)
+                
                 print(
-                    f"[AIP DEBUG][_compute_qty] result orderpoint_id={orderpoint.id} "
-                    f"product_id={orderpoint.product_id.id} qty_on_hand={orderpoint.qty_on_hand} "
+                    f"[AIP DEBUG][_compute_qty] result_collected orderpoint_id={orderpoint.id} "
+                    f"product_id={orderpoint.product_id.id} qty_on_hand={qty_on_hand} "
                     f"virtual_available_real={products_qty[orderpoint.product_id.id]['virtual_available_real']} "
                     f"qty_in_progress={products_qty_in_progress[orderpoint.id]} "
-                    f"qty_forecast={orderpoint.qty_forecast}"
+                    f"qty_forecast={qty_forecast}"
                 )
+
+        # Final assignment to records in self after all database-triggering reads are done
+        for orderpoint in self:
+            if orderpoint.id in computed_results:
+                res = computed_results[orderpoint.id]
+                orderpoint.qty_on_hand = res[0]
+                orderpoint.qty_forecast = res[1]
 
     def _get_qty_to_order(self, qty_in_progress_by_orderpoint=None):
         """Override to ensure the 'To Order' quantity is calculated based on virtual_available_real."""
